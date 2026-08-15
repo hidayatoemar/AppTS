@@ -1,0 +1,34 @@
+# Gate B: CF06-B01 disposable migration gate runner
+# Linux/amd64 only — used with compose.b01.yaml (network_mode: host).
+# Requires internet access at image build time to fetch psql 17 and Flyway 13.0.0.
+FROM --platform=linux/amd64 node:24.19.0-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03
+
+# Install PostgreSQL 17 client (psql only — no server)
+RUN apt-get update -qq \
+ && apt-get install -y --no-install-recommends gnupg curl ca-certificates \
+ && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
+ && printf 'deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main\n' \
+      > /etc/apt/sources.list.d/pgdg.list \
+ && apt-get update -qq \
+ && apt-get install -y --no-install-recommends postgresql-client-17 \
+ && rm -rf /var/lib/apt/lists/*
+
+# Install Flyway 13.0.0 community edition (Linux x64)
+RUN curl -fsSL \
+    "https://repo1.maven.org/maven2/org/flywaydb/flyway-commandline/13.0.0/flyway-commandline-13.0.0-linux-x64.tar.gz" \
+    -o /tmp/flyway.tar.gz \
+ && tar -xzf /tmp/flyway.tar.gz -C /opt \
+ && ln -s /opt/flyway-13.0.0/flyway /usr/local/bin/flyway \
+ && rm /tmp/flyway.tar.gz
+
+WORKDIR /workspace
+
+COPY tools/b01-db-verify.mjs        tools/b01-db-verify.mjs
+COPY db/migrations                   db/migrations
+COPY db/verify                       db/verify
+COPY db/fixtures                     db/fixtures
+COPY deploy/db/gate-b01-entrypoint.sh /gate-b01-entrypoint.sh
+RUN chmod 0555 /gate-b01-entrypoint.sh
+
+ENTRYPOINT ["/gate-b01-entrypoint.sh"]

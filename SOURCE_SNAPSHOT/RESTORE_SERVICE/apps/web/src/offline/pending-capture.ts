@@ -1,0 +1,4 @@
+export interface PendingCaptureEnvelope { readonly captureId:string;readonly kind:"OBSERVATION"|"DRAFT_EVIDENCE";readonly payload:Readonly<Record<string,unknown>>;readonly localSequence:number;readonly createdAt:string;readonly sensitiveFinalEffect:false; }
+export interface PendingCaptureStore { count():Promise<number>;put(value:PendingCaptureEnvelope):Promise<void>;list():Promise<readonly PendingCaptureEnvelope[]>; }
+export async function savePendingCapture(store:PendingCaptureStore,value:PendingCaptureEnvelope):Promise<void>{if(value.sensitiveFinalEffect!==false)throw new Error("OFFLINE_SENSITIVE_EFFECT_FORBIDDEN");if(await store.count()>=250)throw new Error("OFFLINE_CAPTURE_BOUND_REACHED");await store.put(Object.freeze({...value}));}
+export const OFFLINE_AUTHORITY_LABEL="OFFLINE / NOT AUTHORITATIVE CURRENT CONTEXT" as const;

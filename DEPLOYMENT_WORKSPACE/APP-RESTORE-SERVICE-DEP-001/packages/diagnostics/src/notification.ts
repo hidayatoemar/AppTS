@@ -1,0 +1,7 @@
+import type { DiagnosticChannelClass, DiagnosticEvent, DiagnosticNotification } from "@appts-restore-service/contracts";
+export interface DiagnosticRouting { readonly configurationSnapshotId: string; readonly channelClass: DiagnosticChannelClass; readonly resolvedRoleOrQueueRef: string; }
+export function createDiagnosticNotification(event: DiagnosticEvent, routing: DiagnosticRouting | undefined, ids: { notificationId: string; sanitizedPayloadEvidenceId: string; outboxEntryId: string; producedAt: string; queuedAt: string }): DiagnosticNotification {
+  if (!routing) throw new Error("DIAGNOSTIC_ROUTING_NO_DEFAULT");
+  if (!event.error_event_id || !event.canonical_error_code || !event.correlation_id || !event.occurred_at || !event.environment_ref || !event.component_ref || !event.severity_ref || !event.diagnostic_effect_status || !event.secure_diagnostic_bundle_ref) throw new Error("DIAGNOSTIC_EVENT_INCOMPLETE_FOR_NOTIFICATION");
+  return Object.freeze({ notification_id: ids.notificationId, error_event_id: event.error_event_id, diagnostic_bundle_id: event.secure_diagnostic_bundle_ref, correlation_id: event.correlation_id, channel_class: routing.channelClass, routing_configuration_snapshot_id: routing.configurationSnapshotId, resolved_role_or_queue_ref: routing.resolvedRoleOrQueueRef, sanitized_payload_evidence_id: ids.sanitizedPayloadEvidenceId, outbox_entry_id: ids.outboxEntryId, produced_at: ids.producedAt, queued_at: ids.queuedAt });
+}

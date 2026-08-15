@@ -1,0 +1,198 @@
+﻿APPTS — RESTORE_SERVICE SELF-CONTAINED TOOL-AGNOSTIC BUILD PACK PRODUCTION RELEASE
+
+
+Comm ID: MCR-to-BP-A001
+Version: v1.0_CONTROLLED
+Workspace: WS_AppTS_Codex
+Date: 12 August 2026 WIB
+From: MCR
+To: AppTS Build Pack Production Room — RESTORE_SERVICE
+Message Type: PRODUCTION RELEASE / BOUNDED ARTIFACT ASSEMBLY
+Status: ACTIVE / SOURCE REPOSITORY READ-ONLY / PRODUCTION-DEPLOYMENT NOT AUTHORIZED
+
+
+1. PURPOSE
+
+
+MCR authorizes the Build Pack Production Room to produce one self-contained, portable, tool-agnostic ZIP Build Pack for RESTORE_SERVICE so that a competent Builder can receive one ZIP, extract it, understand the accepted meaning/boundaries, build and verify the contained source using its normal tools, and return standardized evidence without requiring Google Drive access, ChatGPT history, Codex, or any specific AI/IDE/tool.
+
+
+The package also serves as a factual engineering reference for the AppDev team. The final Codex-produced application/source is factual reference implementation evidence; accepted AppTS Product/data/interface/state/Role/policy/UX/architecture meaning remains normative authority. Implementation choices that are not explicitly authoritative must not be promoted into new design meaning.
+
+
+2. AUTHORITATIVE BASELINE
+
+
+Repository: APP-RESTORE-SERVICE-REPO-001
+Branch: main
+Final independently verified constructed baseline commit:
+e39f959fc6839c16c7c6cc75bd15079b4ed57a39
+Parent accepted B07 implementation/evidence baseline:
+f928652ba5b3d770115a251d3bf998d9d217d4de
+
+
+CF06 construction/execution: COMPLETE / ACCEPTED / CLOSED under MCR-CODEX-B08-D021.
+Independent final constructed-candidate review: PASS / ACCEPTED / CLOSED under MCR-to-IV-A010 responding to IV-to-MCR-A009.
+Final accepted evidence includes ambiguity NONE, orphan mandatory obligation/test/fixture/evidence ZERO, final tracked worktree CLEAN, remotes none, and B07 executable verification evidence PASS.
+
+
+3. BUILD PACK WORKSPACE
+
+
+Continue the existing Build Pack workspace; do not recreate completed folders/files unnecessarily.
+
+
+Workspace root:
+WS_AppTS_Codex/06_Build_Pack/APP-RESTORE-SERVICE-BP-001_SELF_CONTAINED_TOOL_AGNOSTIC_v1.0
+Folder ID: 1YjPytYhCIpW417cjxrY0sF4sZC9buN1m
+
+
+A separate APP-RESTORE-SERVICE-BP-001_v1.0_WORKING folder may be used only as a temporary assembly surface if already created by BP; the final controlled delivery shall resolve to one coherent Build Pack release and one final ZIP.
+
+
+The original repository working tree at 03_Repository/RESTORE_SERVICE/03_Repository_Working_Tree remains read-only source evidence. BP shall not modify, normalize, clean, regenerate, commit, or otherwise mutate it.
+
+
+4. REQUIRED FINAL DELIVERY CONTENT
+
+
+The final ZIP shall be self-contained and shall include, at minimum:
+
+
+A. README / Executor Contract
+- package identity and purpose;
+- start-here instructions;
+- tool-agnostic executor contract;
+- semantic/authority boundary;
+- definition of PASS/STOP and completion.
+
+
+B. Current Accepted Baseline
+- repository identity, branch and final commit e39f959fc6839c16c7c6cc75bd15079b4ed57a39;
+- accepted verification state;
+- toolchain/build prerequisites that are genuinely required;
+- provenance sufficient to distinguish normative authority from factual implementation evidence.
+
+
+C. Authority / Meaning Material
+- self-contained copies or controlled extracts of the accepted authoritative material actually needed by a Builder to preserve Product/data/interface/lifecycle-state/Role-authority/policy/UX/runtime meaning;
+- source/revision provenance for each included authority item;
+- no dependency on Drive links for meaning needed during execution.
+
+
+D. Buildable Source Snapshot
+- complete buildable snapshot of RESTORE_SERVICE corresponding to accepted final constructed baseline e39f959fc6839c16c7c6cc75bd15079b4ed57a39;
+- include tracked source/config/build/test/migration/tooling files required for deterministic build/verification;
+- exclude generated/transient material such as node_modules, dist, .tsbuildinfo, caches and unrelated execution residue;
+- source snapshot is a delivery copy, never a mutation of the original repository evidence.
+
+
+E. Build and Verification Contract
+- minimum build/typecheck/test/verification commands or outcomes required to prove the package remains conformant;
+- verification gates derived from accepted final evidence, expressed tool-agnostically where possible;
+- environment requirements shall distinguish required toolchain capability from session-specific Codex paths/configuration;
+- production, external provider activation, real data and secrets shall not be required.
+
+
+F. Return Contract
+- Builder return template with PASS/STOP;
+- starting package identity/checksum;
+- technical corrections, if any, and rationale;
+- files changed;
+- verification results;
+- final source/Git state if Git is used;
+- unresolved blocker if STOP.
+
+
+G. Package Integrity
+- package content manifest;
+- file-level or suitable aggregate integrity ledger;
+- final ZIP SHA-256;
+- Build Pack ID: APP-RESTORE-SERVICE-BP-001;
+- explicit version and baseline binding.
+
+
+5. TOOL-AGNOSTIC EXECUTION PRINCIPLE
+
+
+The Build Pack shall specify what must remain true, what may change, what may not change, and how completion is proven. It shall not require a particular AI model, Codex workflow, IDE, shell, operating system-specific session locator, or ChatGPT conversation history.
+
+
+Core principle:
+The Builder owns technical execution. The Build Pack owns required meaning and acceptance boundaries.
+
+
+A competent Builder may diagnose and make minimum technically necessary corrections in its own working copy when needed to build/typecheck/test the package, provided accepted semantic/contract meaning is preserved. The Builder shall escalate/STOP only when a solution would require changing or interpreting unresolved Product meaning, data meaning, interface/contract meaning, lifecycle/state semantics, Role/authority, policy, accepted UX behavior, runtime architecture/topology, production/data/secrets/provider boundaries, or other missing/conflicting authority.
+
+
+6. REFERENCE IMPLEMENTATION BOUNDARY
+
+
+The e39f959... source snapshot is an independently verified factual reference implementation generated through the AppTS construction process. It may be inspected, built, tested and used for engineering learning/comparison.
+
+
+It does not independently redefine accepted AppTS design. Where an implementation detail is not explicitly bound by accepted authority, it remains an implementation choice rather than new semantic authority.
+
+
+7. ACCEPTANCE CRITERIA FOR BP RETURN
+
+
+BP may return PASS only when:
+- the required Build Pack structure/content is complete;
+- one final ZIP exists;
+- the ZIP is demonstrably self-contained for the defined Builder task;
+- no package-essential meaning depends on Drive or chat history;
+- source snapshot provenance is bound to e39f959fc6839c16c7c6cc75bd15079b4ed57a39;
+- original repository source evidence was not mutated;
+- authority/reference distinction is explicit;
+- package manifest and final ZIP SHA-256 are supplied;
+- a fresh competent Builder can reasonably determine how to start, build, verify and return evidence from the ZIP alone.
+
+
+STOP only for a genuine missing/conflicting authority, inability to obtain a complete and trustworthy baseline/source snapshot, package-integrity failure that cannot be resolved within BP workspace, or boundary crossing requiring MCR decision. Do not STOP for routine packaging/file-format/path/checksum/manifest issues that BP can resolve deterministically inside its workspace.
+
+
+8. EXISTING PARTIAL MATERIAL / NON-AUTHORITY CLARIFICATION
+
+
+MCR acknowledges that initial Build Pack folders and partial source-copy material were created before bounded responsibility was returned to BP. BP may inspect, reuse, replace, or ignore those package-workspace artifacts as technically appropriate, provided the final package satisfies this release and the original repository remains untouched.
+
+
+Artifact titled MCR-CODEX-BP-D022_RESTORE_SERVICE_Tool_Agnostic_Build_Pack_Source_Snapshot_Materialization_v1.0_CONTROLLED, File ID 1vtpUmwiY2nPniGR-pZX3vt-FruymhrYD23euBImaqhY, is EMPTY / CREATED-NOT-PUBLISHED and carries NO authority. Do not use it as instruction.
+
+
+9. COMMUNICATION ROUTE
+
+
+Canonical BP mailbox:
+Inbox_BP
+Folder ID: 19MpEJc5kzCikjcmWRl-xXEwnQXmGIGIc
+
+
+Return route:
+Inbox_MCR
+Folder ID: 1TJXLeEcx_UGLpKrRqWM6mcA0cAmEvKLL
+
+
+Required return title:
+BP-to-MCR-A001_RESTORE_SERVICE_Self_Contained_Tool_Agnostic_Build_Pack_Production_Return_<PASS|STOP>_v1.0_CONTROLLED
+
+
+Primary Response To: MCR-to-BP-A001
+
+
+Formal return publication is authorized when BP has completed the package or reaches a genuine STOP boundary. Chat is notification only.
+
+
+10. STATE
+
+
+Build Pack Production Room: ACTIVE under MCR-to-BP-A001.
+Final CF06 baseline e39f959fc6839c16c7c6cc75bd15079b4ed57a39: FROZEN / INDEPENDENTLY VERIFIED.
+Codex: HOLD.
+IV-CF07-R2: COMPLETE / ACCEPTED / CLOSED.
+Manual Book substantive authoring: remains separate; this release does not activate it.
+Production/deployment/release activation/provider/real-data/secrets: NOT AUTHORIZED.
+
+
+Artifact = Authority. Chat = Notification Only.

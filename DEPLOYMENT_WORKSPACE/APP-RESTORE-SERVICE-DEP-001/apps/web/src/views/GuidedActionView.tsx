@@ -1,0 +1,1 @@
+import {ViewFrame}from"../components/ViewFrame.tsx";export function GuidedActionView(){return <ViewFrame viewId="UX-RS-04" title="Guided Action"><p>Review current actor, target, evidence, currentness and expected version before confirmation. Submission remains pending until authoritative result and refetch.</p></ViewFrame>}

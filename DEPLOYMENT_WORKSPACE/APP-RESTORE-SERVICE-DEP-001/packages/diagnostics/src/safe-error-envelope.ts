@@ -1,0 +1,2 @@
+import type { DiagnosticEvent, SafeErrorEnvelope } from "@appts-restore-service/contracts";
+export function createSafeErrorEnvelope(event: DiagnosticEvent): SafeErrorEnvelope { return Object.freeze({ canonical_error_code: event.canonical_error_code, safe_user_reference_code: event.safe_user_reference_code, correlation_id: event.correlation_id, diagnostic_effect_status: event.diagnostic_effect_status, retryability_status_ref: event.retryability_status_ref, safe_message_key: event.safe_message_key }); }

@@ -1,0 +1,10 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { I01_INTERFACE_IDENTITY, I01_PROFILE_IDENTITY, I01_SEMANTIC_VERSION, validateTicketActivation } from "../../packages/contracts/src/i01-ticket-activation.ts";
+
+const valid = () => ({ interface_identity: I01_INTERFACE_IDENTITY, semantic_version: I01_SEMANTIC_VERSION, profile_identity: I01_PROFILE_IDENTITY, message_id: "m-1", idempotency_key: "i-1", correlation_id: "c-1", producer_ref: "D-01", subject_ref: "ticket-1", source_sequence_or_version: 1, produced_at: "2026-01-02T03:04:05.006Z", currentness_ref: "current-1", payload_hash: "hash-1", payload: { activation_id: "a-1", ticket_id: "ticket-1", purpose_binding_id: "pb-1", purpose_identity: "purpose", purpose_version: "1", package_identity: "package", package_version: "1", domain_id: "domain-1", intake_decision_id: "decision-1", responsible_assignment_ref: "assignment-1", formation_evidence_set_ref: "evidence-1", producer_aggregate_version: 1, effective_at: "2026-01-02T03:04:05.006Z", activation_code: "ACTIVATE" } });
+
+test("CF05-CT-001 I01 exact identity version and profile", () => { assert.equal(validateTicketActivation(valid()).ok, true); const wrong = { ...valid(), semantic_version: "2.0.0" }; assert.equal(validateTicketActivation(wrong).ok, false); });
+test("CF05-CT-002 I01 missing required field fails closed", () => { const value = valid(); const { ticket_id: _removed, ...payload } = value.payload; assert.equal(validateTicketActivation({ ...value, payload }).ok, false); });
+test("CF05-CT-006 stale I01 without currentness is rejected", () => { const { currentness_ref: _removed, ...value } = valid(); assert.equal(validateTicketActivation(value).ok, false); });
+test("CF05-CT-008 I01 activation is complete and atomic", () => { const value = valid(); assert.equal(validateTicketActivation(value).ok, true); assert.equal(validateTicketActivation({ ...value, payload: { ...value.payload, activation_code: "PARTIAL" } }).ok, false); assert.equal(validateTicketActivation({ ...value, payload: { ...value.payload, extra_effect: true } }).ok, false); });

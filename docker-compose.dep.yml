@@ -1,0 +1,16 @@
+services:
+  verify-dep:
+    build:
+      context: .
+      dockerfile: Dockerfile.build
+    working_dir: /app
+    volumes:
+      - ./DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001:/app
+      - node_modules_dep:/app/node_modules
+    environment:
+      CI: "1"
+    tty: true
+    stdin_open: true
+
+volumes:
+  node_modules_dep:

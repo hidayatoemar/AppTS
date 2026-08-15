@@ -1,0 +1,4 @@
+export interface CommunicationObligation { readonly obligationId: string; readonly triggerRef: string; readonly audienceClassRef?: string; readonly channelProfileRef?: string; readonly contentBasisRef: string; readonly status: "HELD_NO_DEFAULT" | "READY" | "QUEUED"; }
+export function resolveCommunication(obligation: Omit<CommunicationObligation, "status">): CommunicationObligation { return Object.freeze({ ...obligation, status: obligation.audienceClassRef && obligation.channelProfileRef ? "READY" : "HELD_NO_DEFAULT" }); }
+export interface CommunicationDelivery { readonly attemptId: string; readonly transportStatus: "ACCEPTED" | "DELIVERED" | "FAILED" | "UNCERTAIN"; readonly businessSuccess: false; readonly lifecycleEffect: false; }
+export function recordDelivery(attemptId: string, transportStatus: CommunicationDelivery["transportStatus"]): CommunicationDelivery { return Object.freeze({ attemptId, transportStatus, businessSuccess: false, lifecycleEffect: false }); }

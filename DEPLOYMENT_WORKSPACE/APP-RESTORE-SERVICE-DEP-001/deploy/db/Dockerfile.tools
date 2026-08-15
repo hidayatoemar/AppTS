@@ -1,0 +1,16 @@
+FROM --platform=linux/amd64 node:24.19.0-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS node-tools
+
+FROM --platform=linux/amd64 postgres:17.11-bookworm@sha256:07edf880f0cf3f742c990d23faf92cb19e84923a8bce30f7d8e1a8ab63cae7b3
+
+COPY --from=node-tools /usr/local/bin/node /usr/local/bin/node
+
+WORKDIR /workspace
+COPY --from=dep_db . /workspace/deploy/db
+COPY --from=dep_migrations . /workspace/db/migrations
+COPY --from=dep_verify . /workspace/db/verify
+COPY --from=dep_fixtures . /workspace/db/fixtures
+COPY --from=dep_tools verify-schema-frozen.mjs /workspace/tools/verify-schema-frozen.mjs
+
+USER postgres
+ENTRYPOINT []
+CMD ["sh"]

@@ -1,0 +1,1 @@
+import{ViewFrame}from"../components/ViewFrame.tsx";export function DiagnosticSafeView(){return <ViewFrame viewId="UX-RS-15" title="Diagnostic Safe Error / Secure Retrieval"><p>Diagnostic access creates no Product role or business authority.</p></ViewFrame>}

@@ -1,0 +1,19 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./apps/api" },
+    { "path": "./apps/worker" },
+    { "path": "./packages/contracts" },
+    { "path": "./packages/core-d01" },
+    { "path": "./packages/core-d02" },
+    { "path": "./packages/core-d03" },
+    { "path": "./packages/runtime-d04" },
+    { "path": "./packages/adapters-d05" },
+    { "path": "./packages/interaction-d06" },
+    { "path": "./packages/diagnostics" },
+    { "path": "./packages/persistence" },
+    { "path": "./packages/config" },
+    { "path": "./packages/observability" },
+    { "path": "./packages/test-support" }
+  ]
+}

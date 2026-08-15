@@ -1,0 +1,4 @@
+import type { OperationalInstrumentationPayload } from "@appts-restore-service/contracts";
+export interface AttentionSignal { readonly signalId: string; readonly ticketRef: string; readonly reasonRef: string; readonly severityRef?: string; readonly sourceEvidenceRef: string; readonly effectOwnership: "NONE_OBSERVATIONAL_ONLY"; }
+export function createAttentionSignal(input: Omit<AttentionSignal, "effectOwnership">): AttentionSignal { return Object.freeze({ ...input, effectOwnership: "NONE_OBSERVATIONAL_ONLY" }); }
+export function observeOperationalInstrumentation(event: OperationalInstrumentationPayload): { readonly event: OperationalInstrumentationPayload; readonly effectOwnership: "NONE_OBSERVATIONAL_ONLY" } { return Object.freeze({ event: Object.freeze({ ...event }), effectOwnership: "NONE_OBSERVATIONAL_ONLY" }); }

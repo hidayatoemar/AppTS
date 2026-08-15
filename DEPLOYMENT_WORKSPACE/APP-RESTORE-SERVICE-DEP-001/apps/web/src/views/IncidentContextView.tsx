@@ -1,0 +1,1 @@
+import{ViewFrame}from"../components/ViewFrame.tsx";export function IncidentContextView(){return <ViewFrame viewId="UX-RS-09" title="Incident / Relationship Context"><p>Related Tickets remain separate accountable contexts.</p></ViewFrame>}

@@ -1,0 +1,2 @@
+export interface OutboxRepository<Entry> { loadReady(): Promise<readonly Entry[]>; publish(entry: Entry): Promise<"ACCEPTED" | "FAILED" | "UNCERTAIN">; record(entry: Entry, result: "ACCEPTED" | "FAILED" | "UNCERTAIN"): Promise<void>; }
+export async function runOutboxWorker<Entry>(repository: OutboxRepository<Entry>): Promise<number> { const entries = await repository.loadReady(); for (const entry of entries) { const result = await repository.publish(entry); await repository.record(entry, result); } return entries.length; }

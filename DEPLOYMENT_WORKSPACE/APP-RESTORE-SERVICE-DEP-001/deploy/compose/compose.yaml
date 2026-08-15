@@ -1,0 +1,53 @@
+name: appts-restore-service-dep001
+
+services:
+  api:
+    platform: linux/amd64
+    build:
+      context: ../..
+      dockerfile: Dockerfile.dep
+    entrypoint: ["/usr/local/bin/dep-entrypoint"]
+    environment:
+      API_LISTEN_PORT: "8080"
+      APPTS_STAGING_LABEL: ${APPTS_STAGING_LABEL:?APPTS_STAGING_LABEL must be supplied externally}
+      APPTS_RUNTIME_DATABASE_URL: ${APPTS_RUNTIME_DATABASE_URL:?APPTS_RUNTIME_DATABASE_URL must be supplied externally}
+      DATABASE_URL: ${APPTS_RUNTIME_DATABASE_URL:?APPTS_RUNTIME_DATABASE_URL must be supplied externally}
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - dep-ingress
+      - dep-db-internal
+
+  postgres:
+    platform: linux/amd64
+    image: postgres:17.11-bookworm@sha256:07edf880f0cf3f742c990d23faf92cb19e84923a8bce30f7d8e1a8ab63cae7b3
+    environment:
+      POSTGRES_DB: ${APPTS_POSTGRES_DB:?APPTS_POSTGRES_DB must be supplied externally}
+      POSTGRES_USER: ${APPTS_POSTGRES_USER:?APPTS_POSTGRES_USER must be supplied externally}
+      POSTGRES_PASSWORD: ${APPTS_POSTGRES_PASSWORD:?APPTS_POSTGRES_PASSWORD must be supplied externally}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - dep-db-internal
+
+networks:
+  dep-ingress:
+    driver: bridge
+    internal: false
+    attachable: false
+  dep-db-internal:
+    driver: bridge
+    internal: true
+    attachable: false

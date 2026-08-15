@@ -1,0 +1,2 @@
+import type { DiagnosticAdapterFailureLink } from "@appts-restore-service/contracts";
+export function linkAdapterFailure(link: DiagnosticAdapterFailureLink, maximumDepth: number): DiagnosticAdapterFailureLink { if (link.recursion_depth < 1 || link.recursion_depth > maximumDepth) throw new Error("ADAPTER_FAILURE_RECURSION_DEPTH_REJECTED"); if (link.parent_error_event_id === link.child_error_event_id) throw new Error("SELF_RECURSIVE_FAILURE_LINK_REJECTED"); return Object.freeze({ ...link }); }
