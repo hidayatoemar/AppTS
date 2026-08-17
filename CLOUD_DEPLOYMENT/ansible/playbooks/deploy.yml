@@ -1,0 +1,18 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Deploy appts-restore-service DEP-001 staging stack to an AlmaLinux 9 LXC:
+#   1. install Docker Engine + compose plugin (nested Docker in LXC)
+#   2. sync the DEP-001 workspace, render .env, build + start the compose stack
+#   3. wait for /healthz and print container status
+# Run:
+#   ansible-playbook playbooks/deploy.yml --ask-vault-pass
+#   (omit --ask-vault-pass when you only use the built-in 'change-me' defaults)
+# ─────────────────────────────────────────────────────────────────────────────
+- name: Deploy appts-restore-service DEP-001 staging stack
+  hosts: appts_lxc
+  gather_facts: true
+  roles:
+    - role: docker
+      tags: [docker]
+    - role: appts
+      tags: [appts]

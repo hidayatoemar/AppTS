@@ -1,0 +1,34 @@
+---
+# Read-only inspection: health/readiness endpoints and compose ps.
+- name: Inspect the deployed appts stack
+  hosts: appts_lxc
+  gather_facts: false
+  tasks:
+    - name: Check API health endpoint
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ appts_api_port }}/healthz"
+        status_code: [200]
+      register: healthz
+      until: healthz.status == 200
+      retries: 10
+      delay: 2
+
+    - name: Check API readiness endpoint
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ appts_api_port }}/readyz"
+        status_code: [200]
+      register: readyz
+
+    - name: Collect compose ps output
+      ansible.builtin.command:
+        cmd: docker compose -f compose.yaml --env-file .env ps
+        chdir: "{{ appts_install_dir }}/deploy/compose"
+      register: compose_ps
+      changed_when: false
+
+    - name: Report health, readiness and container status
+      ansible.builtin.debug:
+        msg:
+          - "healthz: {{ healthz.body }}"
+          - "readyz:  {{ readyz.body }}"
+          - "{{ compose_ps.stdout }}"

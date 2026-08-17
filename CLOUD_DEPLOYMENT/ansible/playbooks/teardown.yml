@@ -1,0 +1,25 @@
+---
+# Stop and remove the appts stack (containers, networks, volumes).
+# Default keeps /opt/appts-restore-service on disk; set
+#   -e appts_teardown_remove_files=true
+# to also delete the install directory.
+- name: Tear down the appts staging stack
+  hosts: appts_lxc
+  gather_facts: false
+  tasks:
+    - name: Stop and remove containers, networks and volumes
+      community.docker.docker_compose_v2:
+        project_src: "{{ appts_install_dir }}/deploy/compose"
+        files:
+          - compose.yaml
+        env_files:
+          - "{{ appts_install_dir }}/deploy/compose/.env"
+        state: absent
+        remove_volumes: true
+        remove_orphans: true
+
+    - name: Remove install directory when requested
+      ansible.builtin.file:
+        path: "{{ appts_install_dir }}"
+        state: absent
+      when: appts_teardown_remove_files | default(false)

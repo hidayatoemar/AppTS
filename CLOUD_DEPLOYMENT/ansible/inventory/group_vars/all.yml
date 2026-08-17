@@ -1,0 +1,50 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# appts-restore-service DEP-001 staging deployment variables.
+# STAGING SIMULATION / NON-PRODUCTION — the DEP-001 entrypoint enforces the
+# exact staging label below and the compose publishes loopback (127.0.0.1) only.
+#
+# SECRETS: all *_password values below resolve to a vault var with a
+# 'change-me' fallback so the playbooks run out of the box against a sandbox.
+# For anything beyond a throwaway sandbox, encrypt real values with:
+#   ansible-vault encrypt_string 'S3cr3t!' --name vault_appts_postgres_password
+# and paste the resulting block into this file, then run playbooks with
+#   --ask-vault-pass  (or --vault-password-file).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Where the deployment workspace lives on the CONTROL node ────────────────
+# Defaults to the DEP-001 workspace that ships in this repository.
+appts_src_dir: "{{ playbook_dir }}/../../../DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001"
+
+# ── Where the stack lives on the TARGET host (LXC) ──────────────────────────
+appts_install_dir: /opt/appts-restore-service
+appts_user: appts
+appts_group: appts
+
+# API port — compose binds loopback 127.0.0.1:<port>.
+appts_api_port: 8080
+
+# Exact label enforced by the DEP-001 entrypoint — do not change.
+appts_staging_label: "STAGING SIMULATION / NON-PRODUCTION"
+
+# ── PostgreSQL (staging) ─────────────────────────────────────────────────────
+appts_postgres_db: appts_dep001_cloud          # must start with appts_dep001_
+appts_postgres_user: appts_runtime
+appts_postgres_password: "{{ vault_appts_postgres_password | default('change-me') }}"
+
+# DATABASE_URL handed to the API container (host `postgres` = internal network).
+appts_runtime_database_url: >-
+  postgresql://{{ appts_postgres_user }}:{{ appts_postgres_password | urlencode }}@postgres:5432/{{ appts_postgres_db }}
+
+# ── Optional G7 DB verification lane (playbooks/migrate.yml only) ───────────
+appts_db_network_mode: INTERNAL_COMPOSE        # fixed hostname 'postgres' inside the lane
+appts_disposable_database: "true"
+appts_admin_db: postgres
+appts_admin_user: appts_admin
+appts_admin_password: "{{ vault_appts_admin_password | default('change-me') }}"
+appts_migration_role: appts_migration
+appts_migration_password: "{{ vault_appts_migration_password | default('change-me') }}"
+appts_runtime_role: appts_runtime
+appts_runtime_password: "{{ vault_appts_runtime_password | default('change-me') }}"
+appts_db_port: 5432
+appts_backup_file: /workspace/backup/appts_dep001_cloud.dump

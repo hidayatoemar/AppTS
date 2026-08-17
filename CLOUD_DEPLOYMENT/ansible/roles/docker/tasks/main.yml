@@ -1,0 +1,52 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# role: docker — install Docker Engine + compose plugin on AlmaLinux 9 (LXC).
+# Uses the official Docker CE repo (RHEL 9 family). Requires nested Docker
+# support in the LXC: on Proxmox enable CT features "nesting" (and "keyctl").
+# ─────────────────────────────────────────────────────────────────────────────
+
+- name: Install dnf plugin + provisioning helpers (rsync for synchronize)
+  ansible.builtin.dnf:
+    name:
+      - dnf-plugins-core
+      - rsync
+      - tar
+    state: present
+    update_cache: true
+
+- name: Add Docker CE repository (RHEL/CentOS 9 family)
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/centos/docker-ce.repo
+    dest: /etc/yum.repos.d/docker-ce.repo
+    mode: "0644"
+    validate_certs: true
+
+- name: Install Docker Engine, containerd and compose plugin
+  ansible.builtin.dnf:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+
+- name: Enable and start docker service
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Verify docker engine and compose plugin versions
+  ansible.builtin.command: "{{ item }}"
+  register: docker_versions
+  changed_when: false
+  loop:
+    - docker --version
+    - docker compose version
+
+- name: Report docker versions
+  ansible.builtin.debug:
+    msg: "{{ item.stdout }}"
+  loop: "{{ docker_versions.results }}"

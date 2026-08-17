@@ -1,0 +1,8 @@
+---
+# Ansible collections required by this deployment.
+# Install with:  ansible-galaxy collection install -r requirements.yml
+collections:
+  - name: community.docker
+    version: ">=3.10.0"     # docker_compose_v2 module (docker compose v2)
+  - name: ansible.posix
+    version: ">=1.6.0"      # synchronize / firewall / mount utility modules
