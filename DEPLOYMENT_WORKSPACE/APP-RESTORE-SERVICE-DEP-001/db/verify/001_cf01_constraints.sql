@@ -24,15 +24,15 @@ BEGIN
   SELECT count(*) INTO table_total
     FROM information_schema.tables
    WHERE table_schema = 'appts' AND table_type = 'BASE TABLE';
-  IF table_total <> 117 THEN
-    RAISE EXCEPTION 'expected 117 CF01/DG04 tables; found %', table_total;
+  IF table_total <> 119 THEN
+    RAISE EXCEPTION 'expected 119 CF01/DG04 tables; found %', table_total;
   END IF;
 
   SELECT count(*) INTO primary_key_total
     FROM pg_constraint c
     JOIN pg_namespace n ON n.oid = c.connamespace
    WHERE n.nspname = 'appts' AND c.contype = 'p';
-  IF primary_key_total <> 117 THEN
+  IF primary_key_total <> 119 THEN
     RAISE EXCEPTION 'expected one primary key per CF01/DG04 table; found %', primary_key_total;
   END IF;
 

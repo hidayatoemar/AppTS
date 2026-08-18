@@ -15,8 +15,8 @@ BEGIN
    WHERE n.nspname = 'appts'
      AND NOT t.tgisinternal
      AND t.tgname LIKE 'trg_%__append_only';
-  IF append_only_trigger_total <> 91 THEN
-    RAISE EXCEPTION 'expected 91 append-only guards; found %', append_only_trigger_total;
+  IF append_only_trigger_total <> 93 THEN
+    RAISE EXCEPTION 'expected 93 append-only guards; found %', append_only_trigger_total;
   END IF;
 
   FOREACH required_relation IN ARRAY ARRAY[
