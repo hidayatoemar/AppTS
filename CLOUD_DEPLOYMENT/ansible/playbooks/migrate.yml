@@ -20,16 +20,22 @@
 #   ansible-playbook playbooks/migrate.yml --ask-vault-pass
 # ─────────────────────────────────────────────────────────────────────────────
 - name: Run the G7 DB verification lane
-  hosts: appts_lxc
+  hosts: appts
   gather_facts: false
   vars:
     appts_g7_env_file: "{{ appts_install_dir }}/deploy/db/.env.g7"
   tasks:
     - name: Render G7 environment file
       ansible.builtin.template:
-        src: appts-g7.env.j2
+        src: "{{ playbook_dir }}/../roles/appts/templates/appts-g7.env.j2"
         dest: "{{ appts_g7_env_file }}"
         mode: "0600"
+
+    - name: Ensure a fresh disposable DB lane (tear down any leftover)
+      ansible.builtin.command:
+        cmd: docker compose --env-file .env.g7 -f compose.g7.yaml down --remove-orphans -v
+        chdir: "{{ appts_install_dir }}/deploy/db"
+      changed_when: false
 
     - name: Start isolated postgres + db-tools lane
       ansible.builtin.command:

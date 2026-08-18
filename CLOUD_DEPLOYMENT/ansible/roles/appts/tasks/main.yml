@@ -39,8 +39,13 @@
       - "--exclude=deploy/compose/.env"
       - "--exclude=deploy/db/.env.*"
       - "--exclude=*.log"
-      - "--chmod=D0750,F0640"
+      - "--chmod=D0755,F0644"
   notify: restart appts stack
+
+- name: Normalize workspace permissions for container users
+  ansible.builtin.command:
+    cmd: chmod -R a+rX "{{ appts_install_dir }}"
+  changed_when: false
 
 - name: Render compose environment file
   ansible.builtin.template:
@@ -49,6 +54,15 @@
     owner: "{{ appts_user }}"
     group: "{{ appts_group }}"
     mode: "0600"
+  notify: restart appts stack
+
+- name: Render Caddy reverse proxy configuration
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ appts_install_dir }}/deploy/compose/Caddyfile"
+    owner: "{{ appts_user }}"
+    group: "{{ appts_group }}"
+    mode: "0644"
   notify: restart appts stack
 
 - name: Build and start the appts compose stack

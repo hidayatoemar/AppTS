@@ -1,8 +1,7 @@
 ---
 # ─────────────────────────────────────────────────────────────────────────────
-# role: docker — install Docker Engine + compose plugin on AlmaLinux 9 (LXC).
-# Uses the official Docker CE repo (RHEL 9 family). Requires nested Docker
-# support in the LXC: on Proxmox enable CT features "nesting" (and "keyctl").
+# role: docker — install Docker Engine + compose plugin on AlmaLinux 9 (VPS).
+# Uses the official Docker CE repo (RHEL 9 family).
 # ─────────────────────────────────────────────────────────────────────────────
 
 - name: Install dnf plugin + provisioning helpers (rsync for synchronize)

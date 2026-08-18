@@ -4,7 +4,7 @@
 #   -e appts_teardown_remove_files=true
 # to also delete the install directory.
 - name: Tear down the appts staging stack
-  hosts: appts_lxc
+  hosts: appts
   gather_facts: false
   tasks:
     - name: Stop and remove containers, networks and volumes

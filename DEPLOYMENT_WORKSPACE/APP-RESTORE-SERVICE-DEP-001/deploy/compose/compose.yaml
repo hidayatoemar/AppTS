@@ -25,6 +25,27 @@ services:
       - dep-ingress
       - dep-db-internal
 
+  caddy:
+    image: caddy:2
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL must be supplied externally}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - dep-ingress
+
   postgres:
     platform: linux/amd64
     image: postgres:17.11-bookworm@sha256:07edf880f0cf3f742c990d23faf92cb19e84923a8bce30f7d8e1a8ab63cae7b3
@@ -51,3 +72,7 @@ networks:
     driver: bridge
     internal: true
     attachable: false
+
+volumes:
+  caddy_data:
+  caddy_config:

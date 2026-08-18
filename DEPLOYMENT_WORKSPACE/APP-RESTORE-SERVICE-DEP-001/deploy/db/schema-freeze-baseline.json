@@ -23,11 +23,11 @@
     },
     {
       "path": "db/verify/001_cf01_constraints.sql",
-      "sha256": "f3ea07efbec6eb156e89802139819f3fdb1e572928112bc5df38bc18a34f4456"
+      "sha256": "f09529335475d9ee546c031432375e0dbae523c9f2ec20957b508885d997e67c"
     },
     {
       "path": "db/verify/002_cf01_history_inbox_outbox.sql",
-      "sha256": "c9acf499821d4da555dd75126652cba7ce5323b13307d4d241ee37297fb3e0ed"
+      "sha256": "eb67d7ff4b9306375123da1c744c17f2ccfdec524576b4ba59c24c92d4e63294"
     },
     {
       "path": "db/verify/003_dg04_diagnostics.sql",

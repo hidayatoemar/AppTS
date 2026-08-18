@@ -11,6 +11,10 @@ COPY --from=dep_verify . /workspace/db/verify
 COPY --from=dep_fixtures . /workspace/db/fixtures
 COPY --from=dep_tools verify-schema-frozen.mjs /workspace/tools/verify-schema-frozen.mjs
 
+# The db-tools container runs as `postgres`; it writes the checkpoint backup to
+# /workspace/backup, so /workspace must be writable by that user.
+RUN chown postgres:postgres /workspace
+
 USER postgres
 ENTRYPOINT []
 CMD ["sh"]

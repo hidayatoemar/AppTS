@@ -1,0 +1,36 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# role: firewall — open the public ports needed by the appts stack on the VPS.
+#
+# Caddy publishes 80/443 so the domain (staging.ts.cifo.id) is reachable from
+# anywhere over HTTP/HTTPS. Docker's iptables rules already expose the published
+# ports, but if firewalld is running it may block them first — so we open them
+# explicitly. Note: the cloud provider's security group must ALSO allow 80/443
+# from 0.0.0.0/0 (that part is outside the host).
+# ─────────────────────────────────────────────────────────────────────────────
+
+- name: Check whether firewalld is running
+  ansible.builtin.command: systemctl is-active firewalld
+  register: firewalld_active
+  failed_when: firewalld_active.rc not in [0, 3]
+  changed_when: false
+  check_mode: false
+
+- name: Open HTTP and HTTPS in firewalld
+  ansible.posix.firewalld:
+    service: "{{ item }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop:
+    - http
+    - https
+  when: firewalld_active.rc == 0
+
+- name: Report firewall status
+  ansible.builtin.debug:
+    msg: >-
+      firewalld is {{ firewalld_active.stdout }}
+      (public ports 80/443 are exposed via Docker publish + firewalld
+      {{ 'rules' if firewalld_active.rc == 0 else '(not running, Docker iptables handle publishing)' }}).
+      Ensure the cloud security group allows TCP 80/443 from 0.0.0.0/0.
