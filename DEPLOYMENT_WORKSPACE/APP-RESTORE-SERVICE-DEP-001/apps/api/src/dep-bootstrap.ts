@@ -5,6 +5,7 @@ import fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import fastifyStatic from "@fastify/static";
 import { apiConfigFromEnv, type ApiConfig, type Env } from "@appts-restore-service/config";
 import { createLogger, type Logger } from "@appts-restore-service/observability";
+import { registerWorkQueueRoute } from "./routes/work-queue.ts";
 
 const DEP_COMPONENT = "api-dep001";
 const SERVICE_WORKER_PATH = "/service-worker.js";
@@ -77,6 +78,8 @@ function registerDeploymentRoutes(app: FastifyInstance): void {
     reply.header("Service-Worker-Allowed", "/");
     return reply.sendFile("service-worker.js");
   });
+
+  registerWorkQueueRoute(app);
 
   // This is deliberately the only catch-all route. It is GET-only, refuses every
   // API path before considering static content, and falls back to index.html only

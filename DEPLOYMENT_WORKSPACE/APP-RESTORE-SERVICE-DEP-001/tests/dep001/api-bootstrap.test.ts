@@ -70,6 +70,22 @@ test("DEP bootstrap never serves the SPA for API, diagnostics, intent, or worker
   });
 });
 
+test("DEP bootstrap serves the empty work-queue projection at /api/v1/ui/work-queue", async () => {
+  await withServer(async (app) => {
+    const response = await app.inject({ method: "GET", url: "/api/v1/ui/work-queue" });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.headers["cache-control"], "no-store");
+    const envelope = response.json();
+    assert.equal(envelope.view_id, "UX-RS-01");
+    assert.equal(envelope.currentness_ref, "CURRENT");
+    assert.equal(envelope.source_version_set_ref, "appts-restore-service-dep001/work-queue/v1");
+    assert.equal(typeof envelope.generated_at, "string");
+    assert.ok(Array.isArray(envelope.data.items));
+    assert.equal(envelope.data.items.length, 0);
+    assert.doesNotMatch(response.body, /Restore Service/);
+  });
+});
+
 test("DEP bootstrap fails closed for config and static bundle failures", async () => {
   await assert.rejects(
     () => createDepBootstrapServer({ env: { API_LISTEN_PORT: "3000" }, staticRoot }),
