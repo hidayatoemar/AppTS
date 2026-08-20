@@ -19,7 +19,7 @@ jobs:
   independent-nonprod:
     if: github.ref == 'refs/heads/experiment/independent-restore-deploy'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       INDEP_POSTGRES_PASSWORD: ${{ secrets.INDEP_POSTGRES_PASSWORD }}
     steps:
