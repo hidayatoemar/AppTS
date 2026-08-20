@@ -1,0 +1,90 @@
+---
+- name: Observe corrected independent DB gate without mutation
+  hosts: independent
+  become: true
+  gather_facts: false
+  vars:
+    appts_install_dir: /opt/appts-independent-restore-service
+    appts_compose_dir: "{{ appts_install_dir }}/deploy/compose"
+    appts_db_name: appts_dep001_independent
+    appts_admin_user: appts_admin
+  tasks:
+    - name: Capture DB role/schema counts read-only
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - exec
+          - -T
+          - postgres
+          - psql
+          - -X
+          - -U
+          - "{{ appts_admin_user }}"
+          - -d
+          - "{{ appts_db_name }}"
+          - -Atqc
+          - >-
+            SELECT 'runtime_flags=' || rolsuper || '|' || rolcreatedb || '|' || rolcreaterole FROM pg_roles WHERE rolname='appts_runtime';
+            SELECT 'migration_flags=' || rolsuper || '|' || rolcreatedb || '|' || rolcreaterole FROM pg_roles WHERE rolname='appts_migration';
+            SELECT 'appts_table_count=' || count(*) FROM information_schema.tables WHERE table_schema='appts' AND table_type='BASE TABLE';
+            SELECT 'primary_key_count=' || count(*) FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname='appts' AND c.contype='p';
+            SELECT 'runtime_connect=' || has_database_privilege('appts_runtime','appts_dep001_independent','CONNECT');
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      changed_when: false
+      register: db_counts
+
+    - name: Re-run exact verifier 001 read-only through current PostgreSQL
+      ansible.builtin.shell: >-
+        docker compose -f compose.yaml --env-file .env exec -T postgres
+        psql -X -U {{ appts_admin_user }} -d {{ appts_db_name }} -v ON_ERROR_STOP=1
+        < {{ appts_install_dir }}/db/verify/001_cf01_constraints.sql
+      args:
+        chdir: "{{ appts_compose_dir }}"
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+      register: verifier_001
+
+    - name: Re-run exact verifier 002 read-only through current PostgreSQL
+      ansible.builtin.shell: >-
+        docker compose -f compose.yaml --env-file .env exec -T postgres
+        psql -X -U {{ appts_admin_user }} -d {{ appts_db_name }} -v ON_ERROR_STOP=1
+        < {{ appts_install_dir }}/db/verify/002_cf01_history_inbox_outbox.sql
+      args:
+        chdir: "{{ appts_compose_dir }}"
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+      register: verifier_002
+
+    - name: Re-run exact verifier 003 read-only through current PostgreSQL
+      ansible.builtin.shell: >-
+        docker compose -f compose.yaml --env-file .env exec -T postgres
+        psql -X -U {{ appts_admin_user }} -d {{ appts_db_name }} -v ON_ERROR_STOP=1
+        < {{ appts_install_dir }}/db/verify/003_dg04_diagnostics.sql
+      args:
+        chdir: "{{ appts_compose_dir }}"
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+      register: verifier_003
+
+    - name: Report safe DB observer evidence
+      ansible.builtin.debug:
+        msg:
+          - "db_counts={{ db_counts.stdout_lines }}"
+          - "verifier_001_rc={{ verifier_001.rc }}"
+          - "verifier_001_stdout={{ verifier_001.stdout_lines }}"
+          - "verifier_001_stderr={{ verifier_001.stderr_lines }}"
+          - "verifier_002_rc={{ verifier_002.rc }}"
+          - "verifier_002_stdout={{ verifier_002.stdout_lines }}"
+          - "verifier_002_stderr={{ verifier_002.stderr_lines }}"
+          - "verifier_003_rc={{ verifier_003.rc }}"
+          - "verifier_003_stdout={{ verifier_003.stdout_lines }}"
+          - "verifier_003_stderr={{ verifier_003.stderr_lines }}"
