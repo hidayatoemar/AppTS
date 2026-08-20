@@ -34,7 +34,7 @@ jobs:
           test "$confirmation" = 'INDEPENDENT_NONPROD' || { echo 'BLOCKED: invalid confirmation token'; exit 2; }
           test -z "${extra:-}" || { echo 'BLOCKED: malformed request'; exit 2; }
           case "$action" in
-            deploy|status|teardown) ;;
+            preflight|deploy|status|teardown) ;;
             *) echo 'BLOCKED: unsupported action'; exit 2 ;;
           esac
           echo "REQUESTED_ACTION=$action" >> "$GITHUB_ENV"
@@ -46,6 +46,7 @@ jobs:
         working-directory: INDEPENDENT_DEPLOYMENT/ansible
         run: |
           printf '[independent]\nlocalhost ansible_connection=local\n' > inventory.ini
+          ansible-playbook playbooks/preflight.yml --syntax-check
           ansible-playbook playbooks/deploy.yml --syntax-check
           ansible-playbook playbooks/status.yml --syntax-check
           ansible-playbook playbooks/teardown.yml --syntax-check
@@ -62,6 +63,7 @@ jobs:
           test -n "$INDEP_USER" || { echo 'BLOCKED: INDEP_USER is not configured'; exit 2; }
           test -n "$INDEP_SSH_PRIVATE_KEY" || { echo 'BLOCKED: INDEP_SSH_PRIVATE_KEY is not configured'; exit 2; }
           test -n "$INDEP_POSTGRES_PASSWORD" || { echo 'BLOCKED: INDEP_POSTGRES_PASSWORD is not configured'; exit 2; }
+          echo 'SECRET_BINDINGS_PRESENT: INDEP_HOST, INDEP_USER, INDEP_SSH_PRIVATE_KEY, INDEP_POSTGRES_PASSWORD'
 
       - name: Prepare ephemeral SSH and Ansible inventory
         shell: bash
@@ -89,9 +91,10 @@ jobs:
           set -euo pipefail
           mkdir -p ../../INDEPENDENT_DEPLOYMENT/evidence
           case "$REQUESTED_ACTION" in
-            deploy)   playbook=playbooks/deploy.yml ;;
-            status)   playbook=playbooks/status.yml ;;
-            teardown) playbook=playbooks/teardown.yml ;;
+            preflight) playbook=playbooks/preflight.yml ;;
+            deploy)    playbook=playbooks/deploy.yml ;;
+            status)    playbook=playbooks/status.yml ;;
+            teardown)  playbook=playbooks/teardown.yml ;;
             *) echo 'BLOCKED: unsupported action'; exit 2 ;;
           esac
           {
