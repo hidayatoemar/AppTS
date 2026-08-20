@@ -8,12 +8,20 @@
     appts_install_dir: /opt/appts-independent-restore-service
     appts_compose_dir: "{{ appts_install_dir }}/deploy/compose"
     appts_transfer_archive: /tmp/appts-independent-dep001.tar.gz
-    appts_postgres_password: "{{ lookup('ansible.builtin.env', 'INDEP_POSTGRES_PASSWORD') }}"
+    appts_secret_dir: /etc/appts-independent
+    appts_db_secret_file: /etc/appts-independent/db-secrets.json
+    appts_db_tools_image: appts-independent-db-tools:experimental
+    appts_db_name: appts_dep001_independent
+    appts_admin_db: postgres
+    appts_admin_user: appts_admin
+    appts_migration_role: appts_migration
+    appts_runtime_role: appts_runtime
+    appts_runtime_password: "{{ lookup('ansible.builtin.env', 'INDEP_POSTGRES_PASSWORD') }}"
   pre_tasks:
-    - name: Refuse missing disposable database secret
+    - name: Refuse missing disposable runtime database secret
       ansible.builtin.assert:
         that:
-          - appts_postgres_password | length > 0
+          - appts_runtime_password | length > 0
         fail_msg: "BLOCKED: INDEP_POSTGRES_PASSWORD is not configured"
       no_log: true
 
@@ -25,7 +33,123 @@
       ansible.builtin.command: docker compose version
       changed_when: false
 
+    - name: Check whether prior independent Compose material exists
+      ansible.builtin.stat:
+        path: "{{ appts_compose_dir }}/.env"
+      register: prior_compose_env
+
+    - name: Probe prior disposable DB state before any destructive action
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - exec
+          - -T
+          - postgres
+          - sh
+          - -c
+          - >-
+            psql -X -U "$POSTGRES_USER" -d "{{ appts_db_name }}" -Atqc
+            "SELECT 'runtime_flags=' || rolsuper || '|' || rolcreatedb || '|' || rolcreaterole FROM pg_roles WHERE rolname='appts_runtime';
+             SELECT 'table_count=' || count(*) FROM pg_catalog.pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema');
+             SELECT 'schema_present=' || (to_regnamespace('appts') IS NOT NULL AND to_regnamespace('appts_sys') IS NOT NULL);"
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      register: prior_db_probe
+      changed_when: false
+      failed_when: false
+      when: prior_compose_env.stat.exists
+
+    - name: Classify prior disposable DB state
+      ansible.builtin.set_fact:
+        prior_db_known_bad: >-
+          {{ prior_compose_env.stat.exists and
+             prior_db_probe.rc == 0 and
+             'runtime_flags=true|true|true' in prior_db_probe.stdout and
+             'table_count=0' in prior_db_probe.stdout and
+             'schema_present=false' in prior_db_probe.stdout }}
+        prior_db_corrected: >-
+          {{ prior_compose_env.stat.exists and
+             prior_db_probe.rc == 0 and
+             'runtime_flags=false|false|false' in prior_db_probe.stdout and
+             'schema_present=true' in prior_db_probe.stdout }}
+
+    - name: Refuse destructive reset for an ambiguous prior DB state
+      ansible.builtin.assert:
+        that:
+          - (not prior_compose_env.stat.exists) or prior_db_known_bad or prior_db_corrected
+        fail_msg: "BLOCKED: prior disposable DB state is neither the preserved D-002 baseline nor an already-corrected state; refusing automatic volume reset"
+
+    - name: Remove only the preserved empty D-002 baseline stack and volume
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - down
+          - --remove-orphans
+          - -v
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      changed_when: true
+      when: prior_db_known_bad
+
   tasks:
+    - name: Ensure independent secret directory exists
+      ansible.builtin.file:
+        path: "{{ appts_secret_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Check for persisted experimental admin/migration secrets
+      ansible.builtin.stat:
+        path: "{{ appts_db_secret_file }}"
+      register: db_secret_file_state
+
+    - name: Generate separate experimental admin and migration secrets once
+      ansible.builtin.shell: |
+        set -eu
+        umask 077
+        python3.9 - <<'PY'
+        import json, os, secrets
+        path = "/etc/appts-independent/db-secrets.json"
+        data = {
+            "admin_password": secrets.token_urlsafe(36),
+            "migration_password": secrets.token_urlsafe(36),
+        }
+        with open(path, "x", encoding="utf-8") as handle:
+            json.dump(data, handle)
+            handle.write("\n")
+        os.chmod(path, 0o600)
+        PY
+      args:
+        executable: /bin/bash
+      changed_when: true
+      no_log: true
+      when: not db_secret_file_state.stat.exists
+
+    - name: Read persisted experimental DB secrets
+      ansible.builtin.slurp:
+        src: "{{ appts_db_secret_file }}"
+      register: db_secret_file_raw
+      no_log: true
+
+    - name: Bind experimental DB secrets to deployment mechanics
+      ansible.builtin.set_fact:
+        appts_db_secrets: "{{ db_secret_file_raw.content | b64decode | from_json }}"
+        appts_admin_password: "{{ (db_secret_file_raw.content | b64decode | from_json).admin_password }}"
+        appts_migration_password: "{{ (db_secret_file_raw.content | b64decode | from_json).migration_password }}"
+      no_log: true
+
     - name: Package frozen DEP-001 workspace once on Actions runner
       ansible.builtin.command:
         argv:
@@ -90,7 +214,258 @@
         chdir: "{{ appts_compose_dir }}"
       changed_when: false
 
-    - name: Build and start supplied DEP-001 stack
+    - name: Start PostgreSQL only for accepted DB bootstrap mechanics
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - up
+          - -d
+          - postgres
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      changed_when: true
+
+    - name: Wait for PostgreSQL admin database readiness
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - exec
+          - -T
+          - postgres
+          - pg_isready
+          - -U
+          - "{{ appts_admin_user }}"
+          - -d
+          - "{{ appts_admin_db }}"
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      register: postgres_ready
+      changed_when: false
+      retries: 18
+      delay: 3
+      until: postgres_ready.rc == 0
+
+    - name: Detect whether accepted AppTS schemas already exist
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - exec
+          - -T
+          - postgres
+          - psql
+          - -X
+          - -U
+          - "{{ appts_admin_user }}"
+          - -d
+          - "{{ appts_db_name }}"
+          - -Atqc
+          - "SELECT CASE WHEN to_regnamespace('appts') IS NOT NULL AND to_regnamespace('appts_sys') IS NOT NULL THEN 'true' ELSE 'false' END;"
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      register: app_schema_probe
+      changed_when: false
+      failed_when: false
+
+    - name: Locate current DEP internal DB network
+      ansible.builtin.command:
+        argv:
+          - docker
+          - network
+          - ls
+          - --filter
+          - label=com.docker.compose.project=appts-restore-service-dep001
+          - --filter
+          - label=com.docker.compose.network=dep-db-internal
+          - -q
+      register: db_network
+      changed_when: false
+
+    - name: Require one deterministic internal DB network
+      ansible.builtin.assert:
+        that:
+          - (db_network.stdout_lines | length) == 1
+        fail_msg: "BLOCKED: deterministic DEP internal DB network not found"
+
+    - name: Build existing DEP-001 DB tools image when migration is required
+      ansible.builtin.command:
+        argv:
+          - docker
+          - buildx
+          - build
+          - --load
+          - --platform
+          - linux/amd64
+          - -f
+          - deploy/db/Dockerfile.tools
+          - --build-context
+          - dep_db=deploy/db
+          - --build-context
+          - dep_migrations=db/migrations
+          - --build-context
+          - dep_verify=db/verify
+          - --build-context
+          - dep_fixtures=db/fixtures
+          - --build-context
+          - dep_tools=tools
+          - -t
+          - "{{ appts_db_tools_image }}"
+          - .
+      args:
+        chdir: "{{ appts_install_dir }}"
+      changed_when: true
+      when: app_schema_probe.rc != 0 or app_schema_probe.stdout != 'true'
+
+    - name: Run existing DEP-001 role bootstrap without new SQL
+      ansible.builtin.command:
+        argv:
+          - docker
+          - run
+          - --rm
+          - --network
+          - "{{ db_network.stdout }}"
+          - -e
+          - APPTS_DB_NETWORK_MODE
+          - -e
+          - APPTS_STAGING_LABEL
+          - -e
+          - APPTS_DISPOSABLE_DATABASE
+          - -e
+          - APPTS_DB_NAME
+          - -e
+          - APPTS_ADMIN_DB
+          - -e
+          - APPTS_ADMIN_USER
+          - -e
+          - APPTS_ADMIN_PASSWORD
+          - -e
+          - APPTS_MIGRATION_ROLE
+          - -e
+          - APPTS_MIGRATION_PASSWORD
+          - -e
+          - APPTS_RUNTIME_ROLE
+          - -e
+          - APPTS_RUNTIME_PASSWORD
+          - -e
+          - PGHOST
+          - -e
+          - PGPORT
+          - "{{ appts_db_tools_image }}"
+          - sh
+          - /workspace/deploy/db/bootstrap-roles.sh
+      environment:
+        APPTS_DB_NETWORK_MODE: INTERNAL_COMPOSE
+        APPTS_STAGING_LABEL: STAGING SIMULATION / NON-PRODUCTION
+        APPTS_DISPOSABLE_DATABASE: "true"
+        APPTS_DB_NAME: "{{ appts_db_name }}"
+        APPTS_ADMIN_DB: "{{ appts_admin_db }}"
+        APPTS_ADMIN_USER: "{{ appts_admin_user }}"
+        APPTS_ADMIN_PASSWORD: "{{ appts_admin_password }}"
+        APPTS_MIGRATION_ROLE: "{{ appts_migration_role }}"
+        APPTS_MIGRATION_PASSWORD: "{{ appts_migration_password }}"
+        APPTS_RUNTIME_ROLE: "{{ appts_runtime_role }}"
+        APPTS_RUNTIME_PASSWORD: "{{ appts_runtime_password }}"
+        PGHOST: postgres
+        PGPORT: "5432"
+      changed_when: true
+      no_log: true
+      when: app_schema_probe.rc != 0 or app_schema_probe.stdout != 'true'
+
+    - name: Run existing frozen V001-V004 migration mechanism
+      ansible.builtin.command:
+        argv:
+          - docker
+          - run
+          - --rm
+          - --network
+          - "{{ db_network.stdout }}"
+          - -e
+          - APPTS_DB_NETWORK_MODE
+          - -e
+          - APPTS_STAGING_LABEL
+          - -e
+          - APPTS_DISPOSABLE_DATABASE
+          - -e
+          - APPTS_DB_NAME
+          - -e
+          - APPTS_MIGRATION_ROLE
+          - -e
+          - PGHOST
+          - -e
+          - PGPORT
+          - -e
+          - PGDATABASE
+          - -e
+          - PGUSER
+          - -e
+          - PGPASSWORD
+          - "{{ appts_db_tools_image }}"
+          - sh
+          - /workspace/deploy/db/migrate.sh
+      environment:
+        APPTS_DB_NETWORK_MODE: INTERNAL_COMPOSE
+        APPTS_STAGING_LABEL: STAGING SIMULATION / NON-PRODUCTION
+        APPTS_DISPOSABLE_DATABASE: "true"
+        APPTS_DB_NAME: "{{ appts_db_name }}"
+        APPTS_MIGRATION_ROLE: "{{ appts_migration_role }}"
+        PGHOST: postgres
+        PGPORT: "5432"
+        PGDATABASE: "{{ appts_db_name }}"
+        PGUSER: "{{ appts_migration_role }}"
+        PGPASSWORD: "{{ appts_migration_password }}"
+      changed_when: true
+      no_log: true
+      when: app_schema_probe.rc != 0 or app_schema_probe.stdout != 'true'
+
+    - name: Run existing read-only DEP-001 schema verifiers
+      ansible.builtin.command:
+        argv:
+          - docker
+          - run
+          - --rm
+          - --network
+          - "{{ db_network.stdout }}"
+          - -e
+          - PGHOST
+          - -e
+          - PGPORT
+          - -e
+          - PGDATABASE
+          - -e
+          - PGUSER
+          - -e
+          - PGPASSWORD
+          - "{{ appts_db_tools_image }}"
+          - sh
+          - -c
+          - >-
+            psql -X -v ON_ERROR_STOP=1 --file=/workspace/db/verify/001_cf01_constraints.sql &&
+            psql -X -v ON_ERROR_STOP=1 --file=/workspace/db/verify/002_cf01_history_inbox_outbox.sql &&
+            psql -X -v ON_ERROR_STOP=1 --file=/workspace/db/verify/003_dg04_diagnostics.sql
+      environment:
+        PGHOST: postgres
+        PGPORT: "5432"
+        PGDATABASE: "{{ appts_db_name }}"
+        PGUSER: "{{ appts_migration_role }}"
+        PGPASSWORD: "{{ appts_migration_password }}"
+      changed_when: false
+      no_log: true
+
+    - name: Build and start supplied DEP-001 runtime stack
       ansible.builtin.command:
         argv:
           - docker
@@ -126,6 +501,36 @@
         return_content: true
       register: readyz
 
+    - name: Capture corrected DB role and migration evidence read-only
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - exec
+          - -T
+          - postgres
+          - psql
+          - -X
+          - -U
+          - "{{ appts_admin_user }}"
+          - -d
+          - "{{ appts_db_name }}"
+          - -Atqc
+          - >-
+            SELECT 'runtime_flags=' || rolsuper || '|' || rolcreatedb || '|' || rolcreaterole FROM pg_roles WHERE rolname='appts_runtime';
+            SELECT 'migration_flags=' || rolsuper || '|' || rolcreatedb || '|' || rolcreaterole FROM pg_roles WHERE rolname='appts_migration';
+            SELECT 'table_count=' || count(*) FROM pg_catalog.pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema');
+            SELECT 'schemas=' || coalesce(string_agg(nspname,',' ORDER BY nspname),'') FROM pg_namespace WHERE nspname IN ('appts','appts_sys');
+            SELECT 'runtime_connect=' || has_database_privilege('appts_runtime','appts_dep001_independent','CONNECT');
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      changed_when: false
+      register: db_gate_evidence
+
     - name: Capture Compose status
       ansible.builtin.command:
         argv:
@@ -146,4 +551,5 @@
         msg:
           - "healthz={{ healthz.content }}"
           - "readyz={{ readyz.content }}"
+          - "db_gate={{ db_gate_evidence.stdout_lines }}"
           - "compose_ps={{ compose_ps.stdout_lines }}"
