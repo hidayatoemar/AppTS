@@ -1,5 +1,5 @@
 ---
-- name: Observe corrected independent DB gate without mutation
+- name: Observe corrected independent DB gate without DB mutation
   hosts: independent
   become: true
   gather_facts: false
@@ -8,7 +8,41 @@
     appts_compose_dir: "{{ appts_install_dir }}/deploy/compose"
     appts_db_name: appts_dep001_independent
     appts_admin_user: appts_admin
+    verifier_src_dir: "{{ playbook_dir }}/../../../DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/db/verify"
+    verifier_tmp_dir: /tmp/appts-dt-stage2-verifiers
   tasks:
+    - name: Create ephemeral current-verifier directory
+      ansible.builtin.file:
+        path: "{{ verifier_tmp_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Transfer current DT verifier 001 revision
+      ansible.builtin.copy:
+        src: "{{ verifier_src_dir }}/001_cf01_constraints.sql"
+        dest: "{{ verifier_tmp_dir }}/001_cf01_constraints.sql"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Transfer current DT verifier 002 revision
+      ansible.builtin.copy:
+        src: "{{ verifier_src_dir }}/002_cf01_history_inbox_outbox.sql"
+        dest: "{{ verifier_tmp_dir }}/002_cf01_history_inbox_outbox.sql"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Transfer current DT verifier 003 revision
+      ansible.builtin.copy:
+        src: "{{ verifier_src_dir }}/003_dg04_diagnostics.sql"
+        dest: "{{ verifier_tmp_dir }}/003_dg04_diagnostics.sql"
+        owner: root
+        group: root
+        mode: "0600"
+
     - name: Capture DB role/schema counts read-only
       ansible.builtin.command:
         argv:
@@ -43,7 +77,7 @@
       ansible.builtin.shell: >-
         docker compose -f compose.yaml --env-file .env exec -T -e PGTZ=UTC postgres
         psql -X -U {{ appts_admin_user }} -d {{ appts_db_name }} -v ON_ERROR_STOP=1
-        < {{ appts_install_dir }}/db/verify/001_cf01_constraints.sql
+        < {{ verifier_tmp_dir }}/001_cf01_constraints.sql
       args:
         chdir: "{{ appts_compose_dir }}"
         executable: /bin/bash
@@ -55,7 +89,7 @@
       ansible.builtin.shell: >-
         docker compose -f compose.yaml --env-file .env exec -T -e PGTZ=UTC postgres
         psql -X -U {{ appts_admin_user }} -d {{ appts_db_name }} -v ON_ERROR_STOP=1
-        < {{ appts_install_dir }}/db/verify/002_cf01_history_inbox_outbox.sql
+        < {{ verifier_tmp_dir }}/002_cf01_history_inbox_outbox.sql
       args:
         chdir: "{{ appts_compose_dir }}"
         executable: /bin/bash
@@ -67,13 +101,18 @@
       ansible.builtin.shell: >-
         docker compose -f compose.yaml --env-file .env exec -T -e PGTZ=UTC postgres
         psql -X -U {{ appts_admin_user }} -d {{ appts_db_name }} -v ON_ERROR_STOP=1
-        < {{ appts_install_dir }}/db/verify/003_dg04_diagnostics.sql
+        < {{ verifier_tmp_dir }}/003_dg04_diagnostics.sql
       args:
         chdir: "{{ appts_compose_dir }}"
         executable: /bin/bash
       changed_when: false
       failed_when: false
       register: verifier_003
+
+    - name: Remove ephemeral current-verifier directory
+      ansible.builtin.file:
+        path: "{{ verifier_tmp_dir }}"
+        state: absent
 
     - name: Report safe DB observer evidence
       ansible.builtin.debug:
