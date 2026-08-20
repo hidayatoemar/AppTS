@@ -7,6 +7,7 @@
     appts_src_dir: "{{ playbook_dir }}/../../../DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/"
     appts_install_dir: /opt/appts-independent-restore-service
     appts_compose_dir: "{{ appts_install_dir }}/deploy/compose"
+    appts_transfer_archive: /tmp/appts-independent-dep001.tar.gz
     appts_postgres_password: "{{ lookup('ansible.builtin.env', 'INDEP_POSTGRES_PASSWORD') }}"
   pre_tasks:
     - name: Refuse missing disposable database secret
@@ -25,6 +26,24 @@
       changed_when: false
 
   tasks:
+    - name: Package frozen DEP-001 workspace once on Actions runner
+      ansible.builtin.command:
+        argv:
+          - tar
+          - -C
+          - "{{ appts_src_dir }}"
+          - -czf
+          - "{{ appts_transfer_archive }}"
+          - .
+      delegate_to: localhost
+      become: false
+      changed_when: true
+
+    - name: Reset isolated install directory for deterministic transfer
+      ansible.builtin.file:
+        path: "{{ appts_install_dir }}"
+        state: absent
+
     - name: Create isolated install directory
       ansible.builtin.file:
         path: "{{ appts_install_dir }}"
@@ -33,14 +52,20 @@
         group: root
         mode: "0755"
 
-    - name: Copy frozen DEP-001 deployment workspace without modifying repository source
-      ansible.builtin.copy:
-        src: "{{ appts_src_dir }}"
+    - name: Transfer and extract frozen DEP-001 workspace as one archive
+      ansible.builtin.unarchive:
+        src: "{{ appts_transfer_archive }}"
         dest: "{{ appts_install_dir }}/"
         owner: root
         group: root
-        directory_mode: "0755"
-        mode: preserve
+
+    - name: Remove temporary runner transfer archive
+      ansible.builtin.file:
+        path: "{{ appts_transfer_archive }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+      changed_when: true
 
     - name: Render disposable non-production Compose environment
       ansible.builtin.template:
