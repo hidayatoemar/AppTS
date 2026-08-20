@@ -1,0 +1,50 @@
+---
+- name: Independent RESTORE_SERVICE deployment preflight
+  hosts: independent
+  gather_facts: false
+  become: false
+
+  tasks:
+    - name: Confirm SSH execution
+      ansible.builtin.command: /usr/bin/true
+      changed_when: false
+
+    - name: Confirm passwordless sudo
+      ansible.builtin.command: sudo -n /usr/bin/true
+      changed_when: false
+
+    - name: Confirm Docker CLI
+      ansible.builtin.command: sudo -n docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: Confirm Docker Compose v2
+      ansible.builtin.command: sudo -n docker compose version
+      register: compose_version
+      changed_when: false
+
+    - name: Confirm Docker daemon is reachable
+      ansible.builtin.command: sudo -n docker info
+      changed_when: false
+
+    - name: Confirm outbound HTTPS access to Docker registry
+      ansible.builtin.uri:
+        url: https://registry-1.docker.io/v2/
+        method: GET
+        status_code:
+          - 200
+          - 401
+        return_content: false
+        timeout: 15
+      changed_when: false
+
+    - name: Record safe preflight evidence
+      ansible.builtin.debug:
+        msg:
+          - "PREFLIGHT_SSH=PASS"
+          - "PREFLIGHT_PASSWORDLESS_SUDO=PASS"
+          - "PREFLIGHT_DOCKER={{ docker_version.stdout }}"
+          - "PREFLIGHT_COMPOSE={{ compose_version.stdout }}"
+          - "PREFLIGHT_DOCKER_DAEMON=PASS"
+          - "PREFLIGHT_OUTBOUND_HTTPS=PASS"
+          - "No application files, containers, volumes, databases, or project data were changed by this preflight."
