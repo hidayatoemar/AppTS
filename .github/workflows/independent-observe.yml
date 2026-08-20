@@ -1,0 +1,64 @@
+name: Observe independent RESTORE_SERVICE target
+
+on:
+  push:
+    branches:
+      - experiment/independent-observe
+    paths:
+      - .github/workflows/independent-observe.yml
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        env:
+          INDEP_HOST: ${{ secrets.INDEP_HOST }}
+          INDEP_USER: ${{ secrets.INDEP_USER }}
+          INDEP_SSH_PRIVATE_KEY: ${{ secrets.INDEP_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$INDEP_SSH_PRIVATE_KEY" > ~/.ssh/independent_observe_key
+          chmod 600 ~/.ssh/independent_observe_key
+          ssh-keyscan -H "$INDEP_HOST" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Read target state and publish metric contexts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INDEP_HOST: ${{ secrets.INDEP_HOST }}
+          INDEP_USER: ${{ secrets.INDEP_USER }}
+        run: |
+          set -euo pipefail
+          ssh_base=(ssh -i ~/.ssh/independent_observe_key -o BatchMode=yes "$INDEP_USER@$INDEP_HOST")
+
+          dir="$(${ssh_base[@]} 'test -d /opt/appts-independent-restore-service && echo yes || echo no')"
+          running="$(${ssh_base[@]} "sudo -n docker ps -q | wc -l | tr -d ' '")"
+          health="$(${ssh_base[@]} "curl -sS -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:8080/healthz || true")"
+          ready="$(${ssh_base[@]} "curl -sS -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:8080/readyz || true")"
+          build="$(${ssh_base[@]} "pgrep -af 'docker.*build|buildkit|npm|pnpm' >/dev/null && echo yes || echo no")"
+
+          post_status() {
+            local state="$1" context="$2"
+            curl --fail-with-body -sS -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+              -d "{\"state\":\"${state}\",\"context\":\"${context}\"}" >/dev/null
+          }
+
+          post_status success "observe/install-dir-${dir}"
+          post_status success "observe/running-${running}"
+          post_status success "observe/health-${health:-000}"
+          post_status success "observe/ready-${ready:-000}"
+          post_status success "observe/build-${build}"
