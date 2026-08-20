@@ -4,7 +4,8 @@ This directory is deployment-only mechanical glue for the independent comparison
 
 ## Execution model
 
-GitHub Actions manual dispatch
+A deliberate request commit on the isolated experiment branch
+→ GitHub Actions
 → ephemeral SSH/inventory binding from GitHub secrets
 → Ansible
 → separate non-production Linux server
@@ -12,6 +13,10 @@ GitHub Actions manual dispatch
 → health/status evidence uploaded as a GitHub Actions artifact.
 
 The application remains loopback-bound on `127.0.0.1:8080` because that is what the supplied DEP-001 Compose file defines. The harness does not add reverse proxy, public ingress, DNS, TLS, production data, or runtime semantic wiring.
+
+## Why request-by-commit
+
+GitHub only accepts `workflow_dispatch` for a workflow that exists on the repository default branch. This experiment is not allowed to modify Hasan/Adit `main`, so its deployment workflow uses a narrowly scoped `push` trigger instead. The workflow runs only when `INDEPENDENT_DEPLOYMENT/REQUEST_ACTION` changes on `experiment/independent-restore-deploy`.
 
 ## Required GitHub secrets
 
@@ -24,11 +29,19 @@ Configure these only for the independent server:
 
 The target user must have passwordless sudo. The target must already have Docker Engine and Docker Compose v2. This harness verifies those prerequisites and stops if they are absent; it does not choose or provision a cloud provider or OS.
 
-## Run
+## Arm one action
 
-From GitHub Actions, select `Independent RESTORE_SERVICE non-production deployment` on branch `experiment/independent-restore-deploy`.
+Do not create `INDEPENDENT_DEPLOYMENT/REQUEST_ACTION` until the separate server and all four secrets are ready.
 
-Choose `deploy`, `status`, or `teardown`, and type the exact confirmation token `INDEPENDENT_NONPROD`.
+To request exactly one action, create or change that file so its complete content is one of:
+
+`INDEPENDENT_NONPROD deploy`
+
+`INDEPENDENT_NONPROD status`
+
+`INDEPENDENT_NONPROD teardown`
+
+Commit the request only to `experiment/independent-restore-deploy`. That push is the execution trigger.
 
 `deploy` copies the existing DEP-001 workspace to `/opt/appts-independent-restore-service`, renders only the required disposable `.env`, validates Compose, builds/starts the stack, and verifies `/healthz` and `/readyz` from inside the target host.
 
@@ -38,4 +51,4 @@ Choose `deploy`, `status`, or `teardown`, and type the exact confirmation token 
 
 ## Evidence
 
-Each workflow run uploads a text artifact containing branch, commit, selected action, Ansible output, container status, and health results. This evidence is technical comparison material only and does not alter formal AppTS project state.
+Each triggered workflow run uploads a text artifact containing branch, commit, selected action, Ansible output, container status, and health results. This evidence is technical comparison material only and does not alter formal AppTS project state.

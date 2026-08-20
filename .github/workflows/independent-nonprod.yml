@@ -1,21 +1,11 @@
 name: Independent RESTORE_SERVICE non-production deployment
 
 on:
-  workflow_dispatch:
-    inputs:
-      action:
-        description: Action to run against the separate independent server
-        required: true
-        default: deploy
-        type: choice
-        options:
-          - deploy
-          - status
-          - teardown
-      confirmation:
-        description: Type INDEPENDENT_NONPROD to permit execution
-        required: true
-        type: string
+  push:
+    branches:
+      - experiment/independent-restore-deploy
+    paths:
+      - INDEPENDENT_DEPLOYMENT/REQUEST_ACTION
 
 permissions:
   contents: read
@@ -26,9 +16,7 @@ concurrency:
 
 jobs:
   independent-nonprod:
-    if: >-
-      github.ref == 'refs/heads/experiment/independent-restore-deploy' &&
-      inputs.confirmation == 'INDEPENDENT_NONPROD'
+    if: github.ref == 'refs/heads/experiment/independent-restore-deploy'
     runs-on: ubuntu-latest
     env:
       INDEP_POSTGRES_PASSWORD: ${{ secrets.INDEP_POSTGRES_PASSWORD }}
@@ -36,8 +24,31 @@ jobs:
       - name: Checkout isolated experiment branch
         uses: actions/checkout@v4
 
+      - name: Validate deliberate request token
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f INDEPENDENT_DEPLOYMENT/REQUEST_ACTION || { echo 'BLOCKED: request file absent'; exit 2; }
+          request="$(tr -d '\r\n' < INDEPENDENT_DEPLOYMENT/REQUEST_ACTION)"
+          read -r confirmation action extra <<< "$request"
+          test "$confirmation" = 'INDEPENDENT_NONPROD' || { echo 'BLOCKED: invalid confirmation token'; exit 2; }
+          test -z "${extra:-}" || { echo 'BLOCKED: malformed request'; exit 2; }
+          case "$action" in
+            deploy|status|teardown) ;;
+            *) echo 'BLOCKED: unsupported action'; exit 2 ;;
+          esac
+          echo "REQUESTED_ACTION=$action" >> "$GITHUB_ENV"
+
       - name: Install Ansible
         run: python3 -m pip install --disable-pip-version-check ansible-core
+
+      - name: Syntax check deployment playbooks without target access
+        working-directory: INDEPENDENT_DEPLOYMENT/ansible
+        run: |
+          printf '[independent]\nlocalhost ansible_connection=local\n' > inventory.ini
+          ansible-playbook playbooks/deploy.yml --syntax-check
+          ansible-playbook playbooks/status.yml --syntax-check
+          ansible-playbook playbooks/teardown.yml --syntax-check
 
       - name: Validate required independent target bindings
         shell: bash
@@ -71,20 +82,13 @@ jobs:
           restore-independent ansible_host=$INDEP_HOST ansible_user=$INDEP_USER ansible_ssh_private_key_file=$HOME/.ssh/independent_deploy_key ansible_become=true
           EOF
 
-      - name: Syntax check deployment playbooks
-        working-directory: INDEPENDENT_DEPLOYMENT/ansible
-        run: |
-          ansible-playbook playbooks/deploy.yml --syntax-check
-          ansible-playbook playbooks/status.yml --syntax-check
-          ansible-playbook playbooks/teardown.yml --syntax-check
-
-      - name: Execute selected independent action
+      - name: Execute requested independent action
         working-directory: INDEPENDENT_DEPLOYMENT/ansible
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p ../../INDEPENDENT_DEPLOYMENT/evidence
-          case "${{ inputs.action }}" in
+          case "$REQUESTED_ACTION" in
             deploy)   playbook=playbooks/deploy.yml ;;
             status)   playbook=playbooks/status.yml ;;
             teardown) playbook=playbooks/teardown.yml ;;
@@ -93,7 +97,7 @@ jobs:
           {
             echo "experiment_branch=${GITHUB_REF_NAME}"
             echo "experiment_commit=${GITHUB_SHA}"
-            echo "action=${{ inputs.action }}"
+            echo "action=${REQUESTED_ACTION}"
             echo "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             ansible-playbook "$playbook"
             echo "completed_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
