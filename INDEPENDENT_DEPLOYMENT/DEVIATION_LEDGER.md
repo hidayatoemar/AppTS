@@ -16,4 +16,21 @@ Status: EXPERIMENTAL EVIDENCE ONLY
 - Rerun result: PASS. Original TS5083 / TS2307 / TS6053 failure did not recur. `docker compose ... up -d --build` completed; `/healthz` returned `{"status":"ok"}`; `/readyz` returned `{"status":"ready"}`; API and PostgreSQL containers were Up and healthy.
 - First next divergence in this deploy gate: NONE OBSERVED.
 
+## D-002 — Runtime DB bootstrap/migration binding omitted
+
+- Baseline condition: independent runtime Compose initializes PostgreSQL with `APPTS_POSTGRES_USER=appts_runtime`, and no accepted role-bootstrap/migration mechanism is executed before runtime health is declared.
+- Observed failure / gate mismatch: Stage 2 inspection shows PostgreSQL 17.11 reachable, but `appts_runtime` is `superuser=true|createdb=true|createrole=true`; non-system table count is `0`; no application schema/migration state is present.
+- Causal diagnosis: deployment environment binding conflates PostgreSQL bootstrap/admin identity with runtime identity and omits the existing DEP-001 `bootstrap-roles.sh` + `migrate.sh` execution path.
+- Accepted-source basis: DEP-001 `bootstrap-roles.sh` requires distinct migration/runtime roles and constrains both to NOSUPERUSER/NOCREATEDB/NOCREATEROLE; DEP-001 `migrate.sh` applies the frozen V001–V004 sequence as the migration role.
+- Minimum correction planned: rebind disposable PostgreSQL initialization to an admin identity, preserve `appts_runtime` as the runtime identity, and invoke the existing DEP-001 db-tools / `bootstrap-roles.sh` / `migrate.sh` mechanics before API activation. No new SQL, schema, migration, role semantics, or runtime grants will be invented.
+- Disposable-state action: current independent DB contains zero non-system tables and no trial/business data; the isolated Docker volume may be recreated solely to apply the corrected bootstrap path.
+- Classification: environment binding + container/DB bootstrap mechanics — purely mechanical deployment wiring.
+- Product change: NO.
+- Schema semantic change: NO; only existing frozen migrations may run.
+- Runtime grant change: NO; `grant-runtime.sh` remains prohibited/pending unless separately authorized.
+- Formal state change: NO.
+- Correction commit: PENDING.
+- Rerun result: PENDING.
+- First next divergence: PENDING.
+
 No Hasan/Adit troubleshooting commit is imported or cherry-picked. Corrections are independently derived from reproduced evidence.
