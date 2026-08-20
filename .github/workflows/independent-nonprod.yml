@@ -9,15 +9,17 @@ on:
 
 permissions:
   contents: write
+  statuses: write
 
 concurrency:
   group: independent-restore-nonprod
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   independent-nonprod:
     if: github.ref == 'refs/heads/experiment/independent-restore-deploy'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       INDEP_POSTGRES_PASSWORD: ${{ secrets.INDEP_POSTGRES_PASSWORD }}
     steps:
@@ -39,6 +41,19 @@ jobs:
           esac
           echo "REQUESTED_ACTION=$action" >> "$GITHUB_ENV"
           echo 'REQUEST_VALIDATION=PASS' >> "$GITHUB_ENV"
+
+      - name: Publish active run status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -d "{\"state\":\"pending\",\"context\":\"independent-nonprod\",\"description\":\"${REQUESTED_ACTION} in progress\"}" >/dev/null
 
       - name: Install Ansible
         run: python3 -m pip install --disable-pip-version-check ansible-core
@@ -150,3 +165,18 @@ jobs:
           fi
           git commit -m 'chore(experiment): record independent deployment run evidence'
           git push origin HEAD:refs/heads/experiment/independent-restore-deploy
+
+      - name: Publish final run status
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${{ job.status }}" = "success" ]; then state=success; else state=failure; fi
+          curl --fail-with-body -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -d "{\"state\":\"${state}\",\"context\":\"independent-nonprod\",\"description\":\"${REQUESTED_ACTION:-unknown} ${{ job.status }}\"}" >/dev/null
