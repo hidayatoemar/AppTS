@@ -39,9 +39,9 @@
       changed_when: false
       register: db_counts
 
-    - name: Re-run exact verifier 001 read-only through current PostgreSQL
+    - name: Re-run exact verifier 001 read-only with accepted PGTZ binding
       ansible.builtin.shell: >-
-        docker compose -f compose.yaml --env-file .env exec -T postgres
+        docker compose -f compose.yaml --env-file .env exec -T -e PGTZ=UTC postgres
         psql -X -U {{ appts_admin_user }} -d {{ appts_db_name }} -v ON_ERROR_STOP=1
         < {{ appts_install_dir }}/db/verify/001_cf01_constraints.sql
       args:
@@ -51,9 +51,9 @@
       failed_when: false
       register: verifier_001
 
-    - name: Re-run exact verifier 002 read-only through current PostgreSQL
+    - name: Re-run exact verifier 002 read-only with accepted PGTZ binding
       ansible.builtin.shell: >-
-        docker compose -f compose.yaml --env-file .env exec -T postgres
+        docker compose -f compose.yaml --env-file .env exec -T -e PGTZ=UTC postgres
         psql -X -U {{ appts_admin_user }} -d {{ appts_db_name }} -v ON_ERROR_STOP=1
         < {{ appts_install_dir }}/db/verify/002_cf01_history_inbox_outbox.sql
       args:
@@ -63,9 +63,9 @@
       failed_when: false
       register: verifier_002
 
-    - name: Re-run exact verifier 003 read-only through current PostgreSQL
+    - name: Re-run exact verifier 003 read-only with accepted PGTZ binding
       ansible.builtin.shell: >-
-        docker compose -f compose.yaml --env-file .env exec -T postgres
+        docker compose -f compose.yaml --env-file .env exec -T -e PGTZ=UTC postgres
         psql -X -U {{ appts_admin_user }} -d {{ appts_db_name }} -v ON_ERROR_STOP=1
         < {{ appts_install_dir }}/db/verify/003_dg04_diagnostics.sql
       args:
