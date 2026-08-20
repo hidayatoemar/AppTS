@@ -44,8 +44,27 @@ Status: EXPERIMENTAL EVIDENCE ONLY
 - Product change: NO.
 - Verifier expectation change: NO.
 - Formal state change: NO.
-- Correction commit: PENDING.
-- Rerun result: PENDING.
-- First next divergence: PENDING.
+- Correction commit: `e1f71343ea53f85364ef1b8f36e1c512f0c0dd18` — EXPERIMENTAL verifier PGTZ binding / NOT PRODUCT CHANGE.
+- Exact rerun trigger: `98c8c5d30740206ad502b8cc65bfc843974734bf`; GitHub Actions observer run `32391415278`.
+- Rerun result: PASS for the mechanical timezone correction. The `Etc/UTC` mismatch did not recur.
+- First next divergence: verifier 001 now reaches schema-count validation and reports `expected 117 CF01/DG04 tables; found 119`; verifier 002 reports `expected 91 append-only guards; found 93`; verifier 003 PASS.
+
+## D-004 — Accepted migration output vs verifier expectation divergence
+
+- Baseline condition: existing DEP-001 role bootstrap and frozen V001–V004 migration mechanism completed against the isolated disposable PostgreSQL 17.11 database with accepted `PGTZ=UTC` verifier binding.
+- Observed state: `appts_runtime` and `appts_migration` are both `NOSUPERUSER/NOCREATEDB/NOCREATEROLE`; schema contains `119` `appts` base tables and `119` primary keys; runtime CONNECT remains false because runtime grants remain pending by accepted DEP-001 design.
+- Failure: verifier 001 returns `expected 117 CF01/DG04 tables; found 119`; verifier 002 returns `expected 91 append-only guards; found 93`; verifier 003 passes.
+- Causal evidence: frozen V004 explicitly adds T118 `provisional_capture_payload_resource` and T119 `pending_capture_idempotency_binding`, and creates append-only guards for both. This deterministically explains +2 tables/PKs and is consistent with the +2 append-only guard observation.
+- Causal diagnosis: existing verifier fixed-count expectations are not aligned with the output of the accepted V001–V004 migration sequence currently executed by DEP-001.
+- Minimum correction: NONE AUTHORIZED BY DT. Changing verifier expected counts would be a verifier-expectation change, explicitly outside DT authority without separate MCR disposition.
+- Classification: accepted migration / verifier expectation divergence — authority required, not a deployment-mechanical correction currently authorized to DT.
+- Product change: NO.
+- Schema semantic change: NO.
+- Verifier expectation change: NO.
+- Runtime grant change: NO; `grant-runtime.sh` not run.
+- Formal state change: NO.
+- Evidence run: `32391415278`, trigger `98c8c5d30740206ad502b8cc65bfc843974734bf`.
+- Result: BLOCKED at Stage 2 migration verification.
+- Next action: WAIT MCR. Stage 3 governed TD-SIM-001 load-path determination is NOT REACHED in this DT progression because Stage 2 is blocked first.
 
 No Hasan/Adit troubleshooting commit is imported or cherry-picked. Corrections are independently derived from reproduced evidence.
