@@ -1,0 +1,109 @@
+name: Independent RESTORE_SERVICE non-production deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Action to run against the separate independent server
+        required: true
+        default: deploy
+        type: choice
+        options:
+          - deploy
+          - status
+          - teardown
+      confirmation:
+        description: Type INDEPENDENT_NONPROD to permit execution
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: independent-restore-nonprod
+  cancel-in-progress: false
+
+jobs:
+  independent-nonprod:
+    if: >-
+      github.ref == 'refs/heads/experiment/independent-restore-deploy' &&
+      inputs.confirmation == 'INDEPENDENT_NONPROD'
+    runs-on: ubuntu-latest
+    env:
+      INDEP_POSTGRES_PASSWORD: ${{ secrets.INDEP_POSTGRES_PASSWORD }}
+    steps:
+      - name: Checkout isolated experiment branch
+        uses: actions/checkout@v4
+
+      - name: Install Ansible
+        run: python3 -m pip install --disable-pip-version-check ansible-core
+
+      - name: Validate required independent target bindings
+        shell: bash
+        env:
+          INDEP_HOST: ${{ secrets.INDEP_HOST }}
+          INDEP_USER: ${{ secrets.INDEP_USER }}
+          INDEP_SSH_PRIVATE_KEY: ${{ secrets.INDEP_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$INDEP_HOST" || { echo 'BLOCKED: INDEP_HOST is not configured'; exit 2; }
+          test -n "$INDEP_USER" || { echo 'BLOCKED: INDEP_USER is not configured'; exit 2; }
+          test -n "$INDEP_SSH_PRIVATE_KEY" || { echo 'BLOCKED: INDEP_SSH_PRIVATE_KEY is not configured'; exit 2; }
+          test -n "$INDEP_POSTGRES_PASSWORD" || { echo 'BLOCKED: INDEP_POSTGRES_PASSWORD is not configured'; exit 2; }
+
+      - name: Prepare ephemeral SSH and Ansible inventory
+        shell: bash
+        env:
+          INDEP_HOST: ${{ secrets.INDEP_HOST }}
+          INDEP_USER: ${{ secrets.INDEP_USER }}
+          INDEP_SSH_PRIVATE_KEY: ${{ secrets.INDEP_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$INDEP_SSH_PRIVATE_KEY" > ~/.ssh/independent_deploy_key
+          chmod 600 ~/.ssh/independent_deploy_key
+          ssh-keyscan -H "$INDEP_HOST" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          cat > INDEPENDENT_DEPLOYMENT/ansible/inventory.ini <<EOF
+          [independent]
+          restore-independent ansible_host=$INDEP_HOST ansible_user=$INDEP_USER ansible_ssh_private_key_file=$HOME/.ssh/independent_deploy_key ansible_become=true
+          EOF
+
+      - name: Syntax check deployment playbooks
+        working-directory: INDEPENDENT_DEPLOYMENT/ansible
+        run: |
+          ansible-playbook playbooks/deploy.yml --syntax-check
+          ansible-playbook playbooks/status.yml --syntax-check
+          ansible-playbook playbooks/teardown.yml --syntax-check
+
+      - name: Execute selected independent action
+        working-directory: INDEPENDENT_DEPLOYMENT/ansible
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../../INDEPENDENT_DEPLOYMENT/evidence
+          case "${{ inputs.action }}" in
+            deploy)   playbook=playbooks/deploy.yml ;;
+            status)   playbook=playbooks/status.yml ;;
+            teardown) playbook=playbooks/teardown.yml ;;
+            *) echo 'BLOCKED: unsupported action'; exit 2 ;;
+          esac
+          {
+            echo "experiment_branch=${GITHUB_REF_NAME}"
+            echo "experiment_commit=${GITHUB_SHA}"
+            echo "action=${{ inputs.action }}"
+            echo "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            ansible-playbook "$playbook"
+            echo "completed_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } 2>&1 | tee ../../INDEPENDENT_DEPLOYMENT/evidence/github-actions-${GITHUB_RUN_ID}.txt
+
+      - name: Upload technical comparison evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-restore-evidence-${{ github.run_id }}
+          path: INDEPENDENT_DEPLOYMENT/evidence/
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,45 @@
+---
+- name: Inspect independent RESTORE_SERVICE non-production target
+  hosts: independent
+  become: true
+  gather_facts: false
+  vars:
+    appts_compose_dir: /opt/appts-independent-restore-service/deploy/compose
+  tasks:
+    - name: Read health endpoint
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/healthz
+        method: GET
+        status_code: 200
+        return_content: true
+      register: healthz
+
+    - name: Read readiness endpoint
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/readyz
+        method: GET
+        status_code: 200
+        return_content: true
+      register: readyz
+
+    - name: Capture Compose status
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - ps
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      changed_when: false
+      register: compose_ps
+
+    - name: Report status evidence
+      ansible.builtin.debug:
+        msg:
+          - "healthz={{ healthz.content }}"
+          - "readyz={{ readyz.content }}"
+          - "compose_ps={{ compose_ps.stdout_lines }}"

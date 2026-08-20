@@ -1,0 +1,124 @@
+---
+- name: Deploy RESTORE_SERVICE to independent non-production target
+  hosts: independent
+  become: true
+  gather_facts: false
+  vars:
+    appts_src_dir: "{{ playbook_dir }}/../../../DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/"
+    appts_install_dir: /opt/appts-independent-restore-service
+    appts_compose_dir: "{{ appts_install_dir }}/deploy/compose"
+    appts_postgres_password: "{{ lookup('ansible.builtin.env', 'INDEP_POSTGRES_PASSWORD') }}"
+  pre_tasks:
+    - name: Refuse missing disposable database secret
+      ansible.builtin.assert:
+        that:
+          - appts_postgres_password | length > 0
+        fail_msg: "BLOCKED: INDEP_POSTGRES_PASSWORD is not configured"
+      no_log: true
+
+    - name: Verify Docker Engine exists on target
+      ansible.builtin.command: docker --version
+      changed_when: false
+
+    - name: Verify Docker Compose v2 exists on target
+      ansible.builtin.command: docker compose version
+      changed_when: false
+
+  tasks:
+    - name: Create isolated install directory
+      ansible.builtin.file:
+        path: "{{ appts_install_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Copy frozen DEP-001 deployment workspace without modifying repository source
+      ansible.builtin.copy:
+        src: "{{ appts_src_dir }}"
+        dest: "{{ appts_install_dir }}/"
+        owner: root
+        group: root
+        directory_mode: "0755"
+        mode: preserve
+
+    - name: Render disposable non-production Compose environment
+      ansible.builtin.template:
+        src: ../templates/compose.env.j2
+        dest: "{{ appts_compose_dir }}/.env"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Validate supplied DEP-001 Compose configuration
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - config
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      changed_when: false
+
+    - name: Build and start supplied DEP-001 stack
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - up
+          - -d
+          - --build
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      register: compose_up
+      changed_when: true
+
+    - name: Wait for loopback health endpoint
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/healthz
+        method: GET
+        status_code: 200
+        return_content: true
+      register: healthz
+      retries: 18
+      delay: 5
+      until: healthz.status == 200
+
+    - name: Verify loopback readiness endpoint
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/readyz
+        method: GET
+        status_code: 200
+        return_content: true
+      register: readyz
+
+    - name: Capture Compose status
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - ps
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      changed_when: false
+      register: compose_ps
+
+    - name: Report independent deployment evidence
+      ansible.builtin.debug:
+        msg:
+          - "healthz={{ healthz.content }}"
+          - "readyz={{ readyz.content }}"
+          - "compose_ps={{ compose_ps.stdout_lines }}"

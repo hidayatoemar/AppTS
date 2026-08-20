@@ -1,0 +1,22 @@
+---
+- name: Tear down independent RESTORE_SERVICE non-production stack
+  hosts: independent
+  become: true
+  gather_facts: false
+  vars:
+    appts_compose_dir: /opt/appts-independent-restore-service/deploy/compose
+  tasks:
+    - name: Stop stack and remove disposable volumes
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - down
+          - -v
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      changed_when: true
