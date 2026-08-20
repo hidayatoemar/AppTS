@@ -6,6 +6,7 @@ on:
       - experiment/independent-observe
     paths:
       - .github/workflows/independent-observe.yml
+      - INDEPENDENT_DEPLOYMENT/OBSERVE_REQUEST
 
 permissions:
   contents: read
