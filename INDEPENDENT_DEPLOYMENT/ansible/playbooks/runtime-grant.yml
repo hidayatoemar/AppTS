@@ -1,0 +1,179 @@
+---
+- name: Apply accepted DEP-001 runtime grant mechanism on isolated DT database
+  hosts: independent
+  become: true
+  gather_facts: false
+  vars:
+    appts_install_dir: /opt/appts-independent-restore-service
+    appts_compose_dir: "{{ appts_install_dir }}/deploy/compose"
+    appts_db_secret_file: /etc/appts-independent/db-secrets.json
+    appts_db_tools_image: appts-independent-db-tools:experimental
+    appts_db_name: appts_dep001_independent
+    appts_admin_user: appts_admin
+    appts_migration_role: appts_migration
+    appts_runtime_role: appts_runtime
+
+  tasks:
+    - name: Read persisted experimental DB secrets
+      ansible.builtin.slurp:
+        src: "{{ appts_db_secret_file }}"
+      register: db_secret_file_raw
+      no_log: true
+
+    - name: Bind migration secret for accepted grant mechanism
+      ansible.builtin.set_fact:
+        appts_migration_password: "{{ (db_secret_file_raw.content | b64decode | from_json).migration_password }}"
+      no_log: true
+
+    - name: Locate current DEP internal DB network
+      ansible.builtin.command:
+        argv:
+          - docker
+          - network
+          - ls
+          - --filter
+          - label=com.docker.compose.project=appts-restore-service-dep001
+          - --filter
+          - label=com.docker.compose.network=dep-db-internal
+          - -q
+      register: db_network
+      changed_when: false
+
+    - name: Require one deterministic internal DB network
+      ansible.builtin.assert:
+        that:
+          - (db_network.stdout_lines | length) == 1
+        fail_msg: "BLOCKED: deterministic DEP internal DB network not found"
+
+    - name: Require existing accepted DB tools image
+      ansible.builtin.command:
+        argv:
+          - docker
+          - image
+          - inspect
+          - "{{ appts_db_tools_image }}"
+      changed_when: false
+
+    - name: Capture pre-grant runtime role evidence
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - exec
+          - -T
+          - postgres
+          - psql
+          - -X
+          - -U
+          - "{{ appts_admin_user }}"
+          - -d
+          - "{{ appts_db_name }}"
+          - -Atqc
+          - >-
+            SELECT 'runtime_flags=' || rolsuper || '|' || rolcreatedb || '|' || rolcreaterole || '|' || rolinherit || '|' || rolcanlogin FROM pg_roles WHERE rolname='appts_runtime';
+            SELECT 'runtime_connect=' || has_database_privilege('appts_runtime','appts_dep001_independent','CONNECT');
+            SELECT 'runtime_temp=' || has_database_privilege('appts_runtime','appts_dep001_independent','TEMPORARY');
+            SELECT 'runtime_appts_usage=' || has_schema_privilege('appts_runtime','appts','USAGE');
+            SELECT 'runtime_appts_create=' || has_schema_privilege('appts_runtime','appts','CREATE');
+            SELECT 'runtime_appts_sys_usage=' || has_schema_privilege('appts_runtime','appts_sys','USAGE');
+            SELECT 'runtime_table_grants=' || count(*) FROM information_schema.role_table_grants WHERE grantee='appts_runtime' AND table_schema IN ('appts','appts_sys');
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      changed_when: false
+      register: pre_grant
+
+    - name: Invoke existing accepted DEP-001 grant-runtime.sh unchanged
+      ansible.builtin.command:
+        argv:
+          - docker
+          - run
+          - --rm
+          - --network
+          - "{{ db_network.stdout }}"
+          - -e
+          - APPTS_DB_NETWORK_MODE
+          - -e
+          - APPTS_STAGING_LABEL
+          - -e
+          - APPTS_DISPOSABLE_DATABASE
+          - -e
+          - APPTS_DB_NAME
+          - -e
+          - APPTS_MIGRATION_ROLE
+          - -e
+          - APPTS_RUNTIME_ROLE
+          - -e
+          - PGHOST
+          - -e
+          - PGPORT
+          - -e
+          - PGDATABASE
+          - -e
+          - PGUSER
+          - -e
+          - PGPASSWORD
+          - "{{ appts_db_tools_image }}"
+          - sh
+          - /workspace/deploy/db/grant-runtime.sh
+      environment:
+        APPTS_DB_NETWORK_MODE: INTERNAL_COMPOSE
+        APPTS_STAGING_LABEL: STAGING SIMULATION / NON-PRODUCTION
+        APPTS_DISPOSABLE_DATABASE: "true"
+        APPTS_DB_NAME: "{{ appts_db_name }}"
+        APPTS_MIGRATION_ROLE: "{{ appts_migration_role }}"
+        APPTS_RUNTIME_ROLE: "{{ appts_runtime_role }}"
+        PGHOST: postgres
+        PGPORT: "5432"
+        PGDATABASE: "{{ appts_db_name }}"
+        PGUSER: "{{ appts_migration_role }}"
+        PGPASSWORD: "{{ appts_migration_password }}"
+      changed_when: true
+      no_log: true
+
+    - name: Capture post-grant runtime role evidence
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - exec
+          - -T
+          - postgres
+          - psql
+          - -X
+          - -U
+          - "{{ appts_admin_user }}"
+          - -d
+          - "{{ appts_db_name }}"
+          - -Atqc
+          - >-
+            SELECT 'runtime_flags=' || rolsuper || '|' || rolcreatedb || '|' || rolcreaterole || '|' || rolinherit || '|' || rolcanlogin FROM pg_roles WHERE rolname='appts_runtime';
+            SELECT 'runtime_connect=' || has_database_privilege('appts_runtime','appts_dep001_independent','CONNECT');
+            SELECT 'runtime_temp=' || has_database_privilege('appts_runtime','appts_dep001_independent','TEMPORARY');
+            SELECT 'runtime_appts_usage=' || has_schema_privilege('appts_runtime','appts','USAGE');
+            SELECT 'runtime_appts_create=' || has_schema_privilege('appts_runtime','appts','CREATE');
+            SELECT 'runtime_appts_sys_usage=' || has_schema_privilege('appts_runtime','appts_sys','USAGE');
+            SELECT 'runtime_table_grants=' || count(*) FROM information_schema.role_table_grants WHERE grantee='appts_runtime' AND table_schema IN ('appts','appts_sys');
+            SELECT 'runtime_sync_result_select=' || has_table_privilege('appts_runtime','appts.sync_result','SELECT');
+            SELECT 'runtime_sync_result_insert=' || has_table_privilege('appts_runtime','appts.sync_result','INSERT');
+            SELECT 'runtime_sync_result_update=' || has_table_privilege('appts_runtime','appts.sync_result','UPDATE');
+            SELECT 'runtime_runtime_ticket_update=' || has_table_privilege('appts_runtime','appts.runtime_ticket','UPDATE');
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      changed_when: false
+      register: post_grant
+
+    - name: Record safe runtime grant evidence
+      ansible.builtin.debug:
+        msg:
+          - "pre_grant={{ pre_grant.stdout_lines }}"
+          - "grant_runtime_script=PASS"
+          - "post_grant={{ post_grant.stdout_lines }}"
+          - "Existing DEP-001 grant-runtime.sh was invoked unchanged; no manual privilege broadening was performed."
