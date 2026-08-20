@@ -32,7 +32,7 @@ BEGIN
     FROM pg_constraint c
     JOIN pg_namespace n ON n.oid = c.connamespace
    WHERE n.nspname = 'appts' AND c.contype = 'p';
-  IF primary_key_total <> 117 THEN
+  IF primary_key_total <> 119 THEN
     RAISE EXCEPTION 'expected one primary key per CF01/DG04 table; found %', primary_key_total;
   END IF;
 
