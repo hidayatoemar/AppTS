@@ -27,7 +27,7 @@ Status: EXPERIMENTAL EVIDENCE ONLY
 - Classification: environment binding + container/DB bootstrap mechanics — purely mechanical deployment wiring.
 - Product change: NO.
 - Schema semantic change: NO; only existing frozen migrations were run.
-- Runtime grant change: NO; `grant-runtime.sh` was not run.
+- Runtime grant change: NO at this stage.
 - Formal state change: NO.
 - Correction commits: `d10602d7e83b570544256b68a3ede7a811f296ae` (env binding) and `3f8e1d385bb5edbace866f94f48b7638ad5e899e` (accepted DB activation mechanics).
 - Rerun trigger: `564f0dbc2b9b953f988d9335f357f2e8c1fa639f` / GitHub Actions run `32390555893`.
@@ -47,29 +47,62 @@ Status: EXPERIMENTAL EVIDENCE ONLY
 - Correction commit: `e1f71343ea53f85364ef1b8f36e1c512f0c0dd18` — EXPERIMENTAL verifier PGTZ binding / NOT PRODUCT CHANGE.
 - Exact rerun trigger: `98c8c5d30740206ad502b8cc65bfc843974734bf`; GitHub Actions observer run `32391415278`.
 - Rerun result: PASS for the mechanical timezone correction. The `Etc/UTC` mismatch did not recur.
-- First next divergence: verifier 001 now reaches schema-count validation and reports `expected 117 CF01/DG04 tables; found 119`; verifier 002 reports `expected 91 append-only guards; found 93`; verifier 003 PASS.
+- First next divergence: verifier 001 reached schema-count validation and reported `expected 117 CF01/DG04 tables; found 119`; verifier 002 reported `expected 91 append-only guards; found 93`; verifier 003 PASS.
 
 ## D-004 — Accepted migration output vs verifier expectation divergence
 
 - Baseline condition: existing DEP-001 role bootstrap and frozen V001–V004 migration mechanism completed against the isolated disposable PostgreSQL 17.11 database with accepted `PGTZ=UTC` verifier binding.
-- Observed state: `appts_runtime` and `appts_migration` are both `NOSUPERUSER/NOCREATEDB/NOCREATEROLE`; schema contains `119` `appts` base tables and `119` primary keys; runtime CONNECT remains false because runtime grants remain pending by accepted DEP-001 design.
+- Observed state: `appts_runtime` and `appts_migration` are both `NOSUPERUSER/NOCREATEDB/NOCREATEROLE`; schema contains `119` `appts` base tables and `119` primary keys; runtime CONNECT initially remained false because runtime grants were not yet applied.
 - Initial failure: verifier 001 returned `expected 117 CF01/DG04 tables; found 119`; verifier 002 returned `expected 91 append-only guards; found 93`; verifier 003 passed.
 - Causal evidence: frozen V004 explicitly adds T118 `provisional_capture_payload_resource` and T119 `pending_capture_idempotency_binding`, and creates the corresponding append-only guards.
-- MCR disposition: `MCR-to-DT-002` accepts this as deterministic verifier expectation drift and authorizes exactly verifier 001 table-count `117→119` plus verifier 002 append-only guard-count `91→93` on the isolated DT branch only.
-- Exact authorized diff: verifier 001 `IF table_total <> 117` → `IF table_total <> 119` and its table-count error text `117` → `119`; verifier 002 `IF append_only_trigger_total <> 91` → `<> 93` and its error text `91` → `93`. No other verifier expectation was changed. In particular, verifier 001 `primary_key_total <> 117` remained unchanged.
+- MCR-to-DT-002 disposition: authorized exactly verifier 001 table-count `117→119` plus verifier 002 append-only guard-count `91→93` on the isolated DT branch only.
 - Correction commit: `61ba29adec25d51e727c0b0bf8461c960c1079e2` — `BOUNDED DT VERIFIER ALIGNMENT / NOT PRODUCT CHANGE`.
-- First rerun trigger: `61b3e08807f5b36749a2bf2789afdfa7c443b5f8`, Actions run `32392425427`.
-- First rerun validity: INVALID FOR ALIGNED VERIFIER RESULT because the observer executed the stale pre-alignment verifier copy under `/opt/appts-independent-restore-service`; this was a test-harness artifact-binding issue, not a DB/verifier semantic result.
-- Minimum observer correction: transfer current verifier files from the checked-out DT revision to an ephemeral target path before read-only execution; remove the ephemeral files after execution. No DB/application state is changed.
-- Observer correction commit: `c15508b515862e663dbdb36964206e6c11bb8ff4` — mechanical current-revision verifier binding.
 - Valid rerun trigger: `328e5b186d6892e67f84c396f9fe0bb0ac6350ca`; Actions run `32392656208`; artifact ID `9415468316`; artifact SHA256 `e5c68a3c133ddb1c3a1f35d4282c0b5405104bdf9b2dc5706ab65ce0a00a57d5`.
-- Valid rerun observed DB state: `runtime_flags=false|false|false`, `migration_flags=false|false|false`, `appts_table_count=119`, `primary_key_count=119`, `runtime_connect=false`.
 - Valid rerun result: verifier 002 PASS; verifier 003 PASS; verifier 001 BLOCKED on the next unchanged expectation: `expected one primary key per CF01/DG04 table; found 119`.
-- First next divergence: verifier 001 primary-key fixed-count expectation remains 117 while deterministic migration output has 119 primary keys.
-- Authority classification: BLOCKED. `MCR-to-DT-002` did not authorize changing the verifier 001 primary-key expectation; it explicitly prohibited verifier relaxation beyond the exact 119-table / 93-guard alignment.
-- Runtime grant: NOT REACHED; `grant-runtime.sh` not run because Stage 2 did not PASS.
-- Stage 3 TD-SIM governed-load-path determination: NOT REACHED because Stage 2 remains BLOCKED.
-- Minimum Operationally Useful RESTORE_SERVICE: NOT ESTABLISHED / BLOCKED.
+- MCR-to-DT-003 disposition: accepted this BLOCKED evidence and authorized exactly verifier 001 primary-key expected count `117→119` on the isolated DT branch.
+
+## D-005 — Bounded primary-key verifier alignment
+
+- Before condition: verifier 001 table expectation already aligned to `119`, but `IF primary_key_total <> 117 THEN` remained while deterministic V001–V004 output contained `119` primary keys.
+- Authority: `MCR-to-DT-003_RESTORE_SERVICE_DT002_BLOCKED_Acceptance_Primary_Key_Verifier_Alignment_and_Operational_Activation_Continuation_v1.0_CONTROLLED`.
+- Exact minimum change: `IF primary_key_total <> 117 THEN` → `IF primary_key_total <> 119 THEN`; associated error text was unchanged because it contained no numeric expected value.
+- Classification: bounded DT verifier expectation alignment against deterministic accepted migration output — NON-PRODUCT / NON-SEMANTIC.
+- Correction commit: `06bf7d9e0cc7ec9180676e4fd58f327fc8b5ef32` — `BOUNDED DT PRIMARY-KEY VERIFIER ALIGNMENT / NOT PRODUCT CHANGE`.
+- Stage 2 rerun trigger: `f10d25f1fe50091f0bbb55fbd90e55217e9f1322`.
+- GitHub Actions run: `32395353799`; artifact ID `9416453474`; artifact SHA256 `15f411cdfa0def3726075e7b0b8455841b16d913d6e14bd8dc1132cbaee433a4`.
+- Observed DB state: `runtime_flags=false|false|false`; `migration_flags=false|false|false`; `appts_table_count=119`; `primary_key_count=119`; `runtime_connect=false` before runtime grants.
+- Rerun result: PASS. Verifier 001 rc=0; verifier 002 rc=0; verifier 003 rc=0. No additional verifier divergence observed.
+- Stage 2 result: PASS.
 - Product/API/UI/schema/business/lifecycle/Role/policy/trial-data semantic change: NONE.
 
-No Hasan/Adit troubleshooting commit is imported or cherry-picked. Corrections are independently derived from reproduced evidence and bounded MCR authority.
+## D-006 — Existing accepted runtime-grant mechanism activation
+
+- Prerequisite: Stage 2 PASS under D-005.
+- Authority: MCR-to-DT-003 continues runtime-grant authority from MCR-to-DT-002 on the isolated non-production DT database.
+- Existing accepted mechanism: `deploy/db/grant-runtime.sh` from DEP-001; invoked unchanged. The script performs privilege quarantine followed by the existing source-backed V001–V004 least-privilege allowlist and its own post-grant verification.
+- Harness-only wiring: `INDEPENDENT_DEPLOYMENT/ansible/playbooks/runtime-grant.yml` commit `f5ec150e4e30f751ed559cadf5f90d470b678a25`; workflow action wiring commit `a29c93adc2f5325908259e6c9c8d357d585b71c8`.
+- Runtime-grant trigger: `c761f98ee5295b40dad4d7010c6b9d387c02b583`.
+- GitHub Actions run: `32395790269`; artifact ID `9416597998`; artifact SHA256 `0410b115cca79befef4264029fb5614c9bdf90371fd8196b00f472c346d7c36e`.
+- Pre-grant evidence: `runtime_flags=false|false|false|false|true`; `runtime_connect=false`; `runtime_temp=false`; `runtime_appts_usage=false`; `runtime_appts_create=false`; `runtime_appts_sys_usage=false`; `runtime_table_grants=0`.
+- Post-grant evidence: runtime elevated flags remained false; `runtime_connect=true`; `runtime_temp=false`; `runtime_appts_usage=true`; `runtime_appts_create=false`; `runtime_appts_sys_usage=false`; representative allowlist checks PASS (`sync_result` SELECT/INSERT true, UPDATE false; `runtime_ticket` UPDATE true).
+- Result: PASS. Existing `grant-runtime.sh` was invoked unchanged; no manual privilege broadening was performed.
+- Product/API/UI/schema/business/lifecycle/Role/policy/trial-data semantic change: NONE.
+
+## D-007 — Stage 3 governed TD-SIM-001 load/reset/reseed path absent
+
+- Prerequisite state: Stage 2 PASS and runtime-grant PASS.
+- Stage 3.1 canonical pack presence: PASS. The controlled TD-SIM-001 folder contains `README.md`, `data/td-sim-001-fixtures.json`, `manifest/data-dictionary.csv`, `manifest/scenario-manifest.csv`, `docs/load-reset-reseed-instructions.md`, `docs/open-dependency-register.md`, `docs/no-real-data-and-semantics-confirmation.md`, and `manifest/integrity-manifest.json`.
+- Stage 3.2 locations searched: current MCR-RUNBOOK-001 controlled instructions; TD-SIM-001 `load-reset-reseed-instructions.md` and open dependency register; current isolated DEP-001 source including package scripts and `db/fixtures`; repository search for TD-SIM loader/seed/reseed binding.
+- Existing accepted deployment workspace finding: `package.json` exposes build/typecheck/test/migration commands but no TD-SIM load/seed/reseed command. `db/fixtures` contains only `cf01_positive.sql` and `cf01_negative.sql`, which are database verification fixtures, not TD-SIM-001 loading mechanics. Repository search found no TD-SIM-001 loader/seed/reseed binding.
+- Controlled TD-SIM instruction: `No load, reset, or reseed command is authorized or verified by this package`; package classification is `STATIC REFERENCE ONLY`; loadability must not be claimed until a governed loader/reseed path is separately authorized and verified.
+- Open dependency register: `Governed data load/reseed path` remains `OPEN / RUNTIME SERVER PROJECTION DEPENDENCY` because no loader or reseed command was verified.
+- Exact missing binding: no existing authorized mechanism maps `data/td-sim-001-fixtures.json` into the running non-production AppTS through traceable accepted application/runtime semantics, and no authorized reset/reseed command exists.
+- Required result under MCR-RUNBOOK-001 and MCR-to-DT-003: `BLOCKED — NO GOVERNED TRIAL DATA LOAD PATH`.
+- New loader/seed/reseed code: NOT CREATED.
+- Manual business-state INSERT/UPDATE: NOT PERFORMED.
+- New dummy data/schema/API/UI projection: NOT CREATED.
+- Stage 4+: NOT REACHED.
+- Minimum Operationally Useful RESTORE_SERVICE: NOT ESTABLISHED / BLOCKED.
+- Next action: WAIT MCR.
+
+No Hasan/Adit troubleshooting commit is imported or cherry-picked. Corrections are independently derived from reproduced evidence and bounded MCR authority. No Product semantics were invented.
