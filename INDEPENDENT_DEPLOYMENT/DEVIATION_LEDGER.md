@@ -11,6 +11,9 @@ Status: EXPERIMENTAL EVIDENCE ONLY
 - Classification: Docker/build context — purely mechanical deployment wiring.
 - Product change: NO.
 - Formal state change: NO.
-- Rerun result: PENDING.
+- Correction commit: `d4fb63792076fe038a68de04fa7bbf02b9c4cbf6` — EXPERIMENTAL DEPLOYMENT CORRECTION / NOT PRODUCT CHANGE.
+- Exact gate rerun trigger: `8ddb6b26b9163cede24cba4bf775c672c2999237`.
+- Rerun result: PASS. Original TS5083 / TS2307 / TS6053 failure did not recur. `docker compose ... up -d --build` completed; `/healthz` returned `{"status":"ok"}`; `/readyz` returned `{"status":"ready"}`; API and PostgreSQL containers were Up and healthy.
+- First next divergence in this deploy gate: NONE OBSERVED.
 
 No Hasan/Adit troubleshooting commit is imported or cherry-picked. Corrections are independently derived from reproduced evidence.
