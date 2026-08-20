@@ -94,6 +94,28 @@
       changed_when: false
       register: postgres_identity
 
+    - name: Capture runtime database role privilege flags read-only
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - exec
+          - -T
+          - postgres
+          - sh
+          - -c
+          - >-
+            psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc
+            "SELECT rolname || '|superuser=' || rolsuper || '|createdb=' || rolcreatedb || '|createrole=' || rolcreaterole FROM pg_catalog.pg_roles WHERE rolname = current_user;"
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      changed_when: false
+      register: postgres_role_flags
+
     - name: Count non-system PostgreSQL tables read-only
       ansible.builtin.command:
         argv:
@@ -149,5 +171,6 @@
           - "compose_ps={{ compose_ps.stdout_lines }}"
           - "api_logs={{ api_logs.stdout_lines }}"
           - "postgres_identity={{ postgres_identity.stdout_lines }}"
+          - "postgres_role_flags={{ postgres_role_flags.stdout }}"
           - "postgres_non_system_table_count={{ postgres_table_count.stdout }}"
           - "postgres_non_system_tables={{ postgres_tables.stdout_lines }}"
