@@ -76,7 +76,7 @@
             import {createPersistencePool} from '@appts-restore-service/persistence';
             const u=new URL(process.env.DATABASE_URL);
             const p=createPersistencePool({connectionString:process.env.DATABASE_URL});
-            try { const r=await p.query('SELECT current_user AS db_user,current_database() AS db_name'); console.log(JSON.stringify({env_user:u.username,env_db:u.pathname.replace(/^\\//,''),db:r.rows[0]})); } finally { await p.end(); }
+            try { const r=await p.query('SELECT current_user AS db_user,current_database() AS db_name'); console.log(JSON.stringify({env_user:u.username,env_db:u.pathname.slice(1),db:r.rows[0]})); } finally { await p.end(); }
       args:
         chdir: "{{ appts_compose_dir }}"
       changed_when: false
