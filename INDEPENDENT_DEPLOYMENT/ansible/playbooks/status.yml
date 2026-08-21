@@ -22,12 +22,14 @@
         return_content: true
       register: readyz
 
-    - name: Confirm browser root HTTP response
+    - name: Capture browser root HTML
       ansible.builtin.uri:
         url: http://127.0.0.1:8080/
         method: GET
         status_code: 200
-        return_content: false
+        return_content: true
+        headers:
+          Accept: text/html
       register: root_http
 
     - name: Probe API prefix without inventing a route
@@ -37,6 +39,30 @@
         status_code: 404
         return_content: true
       register: api_probe
+
+    - name: Probe accepted work-queue projection path read-only
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/api/v1/ui/work-queue
+        method: GET
+        status_code: [200, 404, 405]
+        return_content: true
+      register: work_queue_probe
+
+    - name: Probe accepted intake projection path read-only
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/api/v1/ui/intake
+        method: GET
+        status_code: [200, 404, 405]
+        return_content: true
+      register: intake_probe
+
+    - name: Probe accepted intents path with GET only
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/api/v1/ui/intents
+        method: GET
+        status_code: [200, 404, 405]
+        return_content: true
+      register: intents_get_probe
 
     - name: Capture Compose status
       ansible.builtin.command:
@@ -116,61 +142,21 @@
       changed_when: false
       register: postgres_role_flags
 
-    - name: Count non-system PostgreSQL tables read-only
-      ansible.builtin.command:
-        argv:
-          - docker
-          - compose
-          - -f
-          - compose.yaml
-          - --env-file
-          - .env
-          - exec
-          - -T
-          - postgres
-          - sh
-          - -c
-          - >-
-            psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc
-            "SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema');"
-      args:
-        chdir: "{{ appts_compose_dir }}"
-      changed_when: false
-      register: postgres_table_count
-
-    - name: List non-system PostgreSQL tables read-only
-      ansible.builtin.command:
-        argv:
-          - docker
-          - compose
-          - -f
-          - compose.yaml
-          - --env-file
-          - .env
-          - exec
-          - -T
-          - postgres
-          - sh
-          - -c
-          - >-
-            psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc
-            "SELECT schemaname || '.' || tablename FROM pg_catalog.pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') ORDER BY schemaname, tablename;"
-      args:
-        chdir: "{{ appts_compose_dir }}"
-      changed_when: false
-      register: postgres_tables
-
-    - name: Report status evidence
+    - name: Report status and UI composition evidence
       ansible.builtin.debug:
         msg:
           - "healthz={{ healthz.content }}"
           - "readyz={{ readyz.content }}"
           - "root_http_status={{ root_http.status }}"
+          - "root_contains_server_projection_required={{ 'Current server projection required.' in root_http.content }}"
           - "api_probe_status={{ api_probe.status }}"
-          - "api_probe_content={{ api_probe.content }}"
+          - "work_queue_status={{ work_queue_probe.status }}"
+          - "work_queue_content={{ work_queue_probe.content }}"
+          - "intake_status={{ intake_probe.status }}"
+          - "intake_content={{ intake_probe.content }}"
+          - "intents_get_status={{ intents_get_probe.status }}"
+          - "intents_get_content={{ intents_get_probe.content }}"
           - "compose_ps={{ compose_ps.stdout_lines }}"
           - "api_logs={{ api_logs.stdout_lines }}"
           - "postgres_identity={{ postgres_identity.stdout_lines }}"
           - "postgres_role_flags={{ postgres_role_flags.stdout }}"
-          - "postgres_non_system_table_count={{ postgres_table_count.stdout }}"
-          - "postgres_non_system_tables={{ postgres_tables.stdout_lines }}"
