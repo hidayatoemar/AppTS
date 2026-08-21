@@ -27,6 +27,8 @@ jobs:
         working-directory: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with: { node-version: 24.19.0 }
       - name: Exact toolchain and lock install
@@ -113,7 +115,7 @@ jobs:
           )
           PY
           git diff --check
-      - name: Typecheck build and existing suites
+      - name: Typecheck build and accepted suites
         run: |
           set -euo pipefail
           npm run verify:boundaries
@@ -125,7 +127,51 @@ jobs:
           npm run test:adverse
           npm run test:unit
           npm run test:nfr
-          node --experimental-strip-types --test tests/dep001/*.test.ts tests/dep001/*.test.mjs
+          mapfile -t dep_tests < <(find tests/dep001 -maxdepth 1 -type f \( -name '*.test.ts' -o -name '*.test.mjs' \) ! -name 'hardening.test.mjs' ! -name 'network-mode.test.mjs' ! -name 'schema-freeze.test.mjs' | sort)
+          test "${#dep_tests[@]}" -gt 0
+          node --experimental-strip-types --test "${dep_tests[@]}"
+      - name: Prove unchanged stale DEP baseline failures
+        working-directory: .
+        run: |
+          set -euo pipefail
+          base="$(git rev-parse HEAD^1)"
+          git cat-file -e "$base^{commit}"
+          git worktree add --detach /tmp/codex046-base "$base"
+          stale=(tests/dep001/hardening.test.mjs tests/dep001/network-mode.test.mjs tests/dep001/schema-freeze.test.mjs)
+          set +e
+          (cd /tmp/codex046-base/DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001 && node --experimental-strip-types --test "${stale[@]}") >/tmp/base-stale.tap 2>&1
+          base_rc=$?
+          (cd DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001 && node --experimental-strip-types --test "${stale[@]}") >/tmp/head-stale.tap 2>&1
+          head_rc=$?
+          set -e
+          test "$base_rc" -ne 0
+          test "$head_rc" -ne 0
+          python3 - <<'PY'
+          from pathlib import Path
+          expected = {
+              "runtime privilege construction is quarantined and has no grant SQL",
+              "runtime quarantine verifies with a shell-level fake client and then STOPs",
+              "all database entrypoint scripts use the explicit network guard",
+              "schema freeze guard passes without mutating the deployment source",
+          }
+          def names(path):
+              result=[]
+              for line in Path(path).read_text().splitlines():
+                  line=line.strip()
+                  if line.startswith("✖ "):
+                      name=line[2:].strip()
+                      if " (" in name:
+                          name=name.rsplit(" (",1)[0]
+                      result.append(name)
+              return set(result)
+          base=names('/tmp/base-stale.tap')
+          head=names('/tmp/head-stale.tap')
+          if base != expected or head != expected:
+              raise SystemExit(f"stale failure set changed: base={sorted(base)} head={sorted(head)}")
+          print('BASELINE_STALE_FAILURE_EQUIVALENCE=PASS')
+          PY
+          cat /tmp/base-stale.tap
+          cat /tmp/head-stale.tap
       - name: Docker build
         run: docker build -f Dockerfile.dep -t codex046-dep-api:verify .
       - name: V001-V004 and schema verifiers
@@ -195,7 +241,7 @@ jobs:
         working-directory: .
         run: |
           mkdir -p codex046-evidence
-          cp /tmp/health.json /tmp/ready.json /tmp/work-before.json /tmp/intake-before.json /tmp/first.json /tmp/second.json /tmp/conflict-result.json /tmp/intake-after.json /tmp/work-after.json /tmp/codex046-api.log codex046-evidence/ 2>/dev/null || true
+          cp /tmp/health.json /tmp/ready.json /tmp/work-before.json /tmp/intake-before.json /tmp/first.json /tmp/second.json /tmp/conflict-result.json /tmp/intake-after.json /tmp/work-after.json /tmp/codex046-api.log /tmp/base-stale.tap /tmp/head-stale.tap codex046-evidence/ 2>/dev/null || true
           printf 'commit=%s\nnode=24.19.0\nnpm=11.17.0\n' "$GITHUB_SHA" >codex046-evidence/IDENTITY.txt
       - uses: actions/upload-artifact@v4
         if: always()
