@@ -1,0 +1,39 @@
+---
+- name: Refresh current DEP-001 DB tools image before accepted runtime grant
+  hosts: independent
+  become: true
+  gather_facts: false
+  vars:
+    appts_install_dir: /opt/appts-independent-restore-service
+    appts_db_tools_image: appts-independent-db-tools:experimental
+
+  tasks:
+    - name: Build current DB tools image from admitted installed source
+      ansible.builtin.command:
+        argv:
+          - docker
+          - buildx
+          - build
+          - --load
+          - --platform
+          - linux/amd64
+          - -f
+          - deploy/db/Dockerfile.tools
+          - --build-context
+          - dep_db=deploy/db
+          - --build-context
+          - dep_migrations=db/migrations
+          - --build-context
+          - dep_verify=db/verify
+          - --build-context
+          - dep_fixtures=db/fixtures
+          - --build-context
+          - dep_tools=tools
+          - -t
+          - "{{ appts_db_tools_image }}"
+          - .
+      args:
+        chdir: "{{ appts_install_dir }}"
+      changed_when: true
+
+- import_playbook: runtime-grant.yml
