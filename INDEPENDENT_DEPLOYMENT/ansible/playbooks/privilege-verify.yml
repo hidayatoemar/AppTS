@@ -1,0 +1,85 @@
+---
+- name: Verify exact accepted appts_runtime privilege matrix
+  hosts: independent
+  become: true
+  gather_facts: false
+  vars:
+    appts_compose_dir: /opt/appts-independent-restore-service/deploy/compose
+    appts_db_name: appts_dep001_independent
+  tasks:
+    - name: Read effective runtime role and privilege matrix
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - exec
+          - -T
+          - postgres
+          - psql
+          - -X
+          - -U
+          - appts_admin
+          - -d
+          - "{{ appts_db_name }}"
+          - -Atqc
+          - >-
+            SELECT 'role_flags=' || rolsuper || '|' || rolcreatedb || '|' || rolcreaterole || '|' || rolinherit || '|' || rolreplication || '|' || rolbypassrls || '|' || rolcanlogin FROM pg_roles WHERE rolname='appts_runtime';
+            SELECT 'membership_count=' || count(*) FROM pg_auth_members WHERE member=(SELECT oid FROM pg_roles WHERE rolname='appts_runtime');
+            SELECT 'db_connect=' || has_database_privilege('appts_runtime', current_database(), 'CONNECT');
+            SELECT 'db_temporary=' || has_database_privilege('appts_runtime', current_database(), 'TEMPORARY');
+            SELECT 'appts_usage=' || has_schema_privilege('appts_runtime','appts','USAGE');
+            SELECT 'appts_create=' || has_schema_privilege('appts_runtime','appts','CREATE');
+            SELECT 'appts_sys_usage=' || has_schema_privilege('appts_runtime','appts_sys','USAGE');
+            SELECT 'intake_insert=' || has_table_privilege('appts_runtime','appts.intake_cue','INSERT');
+            SELECT 'intake_select=' || has_table_privilege('appts_runtime','appts.intake_cue','SELECT');
+            SELECT 'intake_update=' || has_table_privilege('appts_runtime','appts.intake_cue','UPDATE');
+            SELECT 'intake_delete=' || has_table_privilege('appts_runtime','appts.intake_cue','DELETE');
+            SELECT 'intake_truncate=' || has_table_privilege('appts_runtime','appts.intake_cue','TRUNCATE');
+            SELECT 'source_observation_insert=' || has_table_privilege('appts_runtime','appts.source_observation','INSERT');
+            SELECT 'source_observation_select=' || has_table_privilege('appts_runtime','appts.source_observation','SELECT');
+            SELECT 'source_observation_update=' || has_table_privilege('appts_runtime','appts.source_observation','UPDATE');
+            SELECT 'source_observation_delete=' || has_table_privilege('appts_runtime','appts.source_observation','DELETE');
+            SELECT 'source_observation_truncate=' || has_table_privilege('appts_runtime','appts.source_observation','TRUNCATE');
+            SELECT 'idempotency_select=' || has_table_privilege('appts_runtime','appts.idempotency_ledger','SELECT');
+            SELECT 'idempotency_insert=' || has_table_privilege('appts_runtime','appts.idempotency_ledger','INSERT');
+            SELECT 'idempotency_update=' || has_table_privilege('appts_runtime','appts.idempotency_ledger','UPDATE');
+            SELECT 'idempotency_delete=' || has_table_privilege('appts_runtime','appts.idempotency_ledger','DELETE');
+            SELECT 'runtime_table_grants=' || count(*) FROM information_schema.role_table_grants WHERE grantee='appts_runtime';
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      register: privilege_matrix
+      changed_when: false
+
+    - name: Require exact MCR-to-DT-012 runtime security contract
+      ansible.builtin.assert:
+        that:
+          - "'role_flags=false|false|false|false|false|false|true' in privilege_matrix.stdout_lines"
+          - "'membership_count=0' in privilege_matrix.stdout_lines"
+          - "'db_connect=true' in privilege_matrix.stdout_lines"
+          - "'db_temporary=false' in privilege_matrix.stdout_lines"
+          - "'appts_usage=true' in privilege_matrix.stdout_lines"
+          - "'appts_create=false' in privilege_matrix.stdout_lines"
+          - "'appts_sys_usage=false' in privilege_matrix.stdout_lines"
+          - "'intake_insert=true' in privilege_matrix.stdout_lines"
+          - "'intake_select=false' in privilege_matrix.stdout_lines"
+          - "'intake_update=false' in privilege_matrix.stdout_lines"
+          - "'intake_delete=false' in privilege_matrix.stdout_lines"
+          - "'intake_truncate=false' in privilege_matrix.stdout_lines"
+          - "'source_observation_insert=true' in privilege_matrix.stdout_lines"
+          - "'source_observation_select=false' in privilege_matrix.stdout_lines"
+          - "'source_observation_update=false' in privilege_matrix.stdout_lines"
+          - "'source_observation_delete=false' in privilege_matrix.stdout_lines"
+          - "'source_observation_truncate=false' in privilege_matrix.stdout_lines"
+          - "'idempotency_select=true' in privilege_matrix.stdout_lines"
+          - "'idempotency_insert=true' in privilege_matrix.stdout_lines"
+          - "'idempotency_update=false' in privilege_matrix.stdout_lines"
+          - "'idempotency_delete=false' in privilege_matrix.stdout_lines"
+        fail_msg: "BLOCKED: effective appts_runtime privilege matrix differs from MCR-to-DT-012"
+
+    - name: Report exact safe runtime privilege evidence
+      ansible.builtin.debug:
+        var: privilege_matrix.stdout_lines
