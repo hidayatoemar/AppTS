@@ -5,6 +5,7 @@
   gather_facts: false
   vars:
     appts_compose_dir: /opt/appts-independent-restore-service/deploy/compose
+    appts_db_name: appts_dep001_independent
   tasks:
     - name: Read health endpoint
       ansible.builtin.uri:
@@ -32,54 +33,31 @@
           Accept: text/html
       register: root_http
 
-    - name: Probe API prefix without inventing a route
-      ansible.builtin.uri:
-        url: http://127.0.0.1:8080/api
-        method: GET
-        status_code: 404
-        return_content: true
-      register: api_probe
-
-    - name: Probe accepted work-queue projection path read-only
+    - name: Require concrete Work Queue projection endpoint
       ansible.builtin.uri:
         url: http://127.0.0.1:8080/api/v1/ui/work-queue
         method: GET
-        status_code: [200, 404, 405]
+        status_code: 200
         return_content: true
       register: work_queue_probe
 
-    - name: Probe accepted intake projection path read-only
+    - name: Require concrete Intake projection endpoint
       ansible.builtin.uri:
         url: http://127.0.0.1:8080/api/v1/ui/intake
         method: GET
-        status_code: [200, 404, 405]
+        status_code: 200
         return_content: true
       register: intake_probe
 
-    - name: Probe accepted intents path with GET only
-      ansible.builtin.uri:
-        url: http://127.0.0.1:8080/api/v1/ui/intents
-        method: GET
-        status_code: [200, 404, 405]
-        return_content: true
-      register: intents_get_probe
-
     - name: Capture Compose status
       ansible.builtin.command:
-        argv:
-          - docker
-          - compose
-          - -f
-          - compose.yaml
-          - --env-file
-          - .env
-          - ps
+        argv: [docker, compose, -f, compose.yaml, --env-file, .env, ps]
       args:
         chdir: "{{ appts_compose_dir }}"
       changed_when: false
       register: compose_ps
 
-    - name: Capture bounded API log tail
+    - name: Probe API database identity through its own DATABASE_URL
       ansible.builtin.command:
         argv:
           - docker
@@ -88,75 +66,119 @@
           - compose.yaml
           - --env-file
           - .env
-          - logs
-          - --no-color
-          - --tail
-          - "100"
+          - exec
+          - -T
           - api
+          - node
+          - --input-type=module
+          - -e
+          - >-
+            import {createPersistencePool} from '@appts-restore-service/persistence';
+            const u=new URL(process.env.DATABASE_URL);
+            const p=createPersistencePool({connectionString:process.env.DATABASE_URL});
+            try { const r=await p.query('SELECT current_user AS db_user,current_database() AS db_name'); console.log(JSON.stringify({env_user:u.username,env_db:u.pathname.replace(/^\\//,''),db:r.rows[0]})); } finally { await p.end(); }
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      changed_when: false
+      register: api_db_identity
+
+    - name: Read exact effective appts_runtime privilege matrix
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - exec
+          - -T
+          - postgres
+          - psql
+          - -X
+          - -U
+          - appts_admin
+          - -d
+          - "{{ appts_db_name }}"
+          - -Atqc
+          - >-
+            SELECT 'role_flags=' || rolsuper || '|' || rolcreatedb || '|' || rolcreaterole || '|' || rolinherit || '|' || rolreplication || '|' || rolbypassrls || '|' || rolcanlogin FROM pg_roles WHERE rolname='appts_runtime';
+            SELECT 'membership_count=' || count(*) FROM pg_auth_members WHERE member=(SELECT oid FROM pg_roles WHERE rolname='appts_runtime');
+            SELECT 'db_connect=' || has_database_privilege('appts_runtime', current_database(), 'CONNECT');
+            SELECT 'db_temporary=' || has_database_privilege('appts_runtime', current_database(), 'TEMPORARY');
+            SELECT 'appts_usage=' || has_schema_privilege('appts_runtime','appts','USAGE');
+            SELECT 'appts_create=' || has_schema_privilege('appts_runtime','appts','CREATE');
+            SELECT 'appts_sys_usage=' || has_schema_privilege('appts_runtime','appts_sys','USAGE');
+            SELECT 'intake_insert=' || has_table_privilege('appts_runtime','appts.intake_cue','INSERT');
+            SELECT 'intake_select=' || has_table_privilege('appts_runtime','appts.intake_cue','SELECT');
+            SELECT 'intake_update=' || has_table_privilege('appts_runtime','appts.intake_cue','UPDATE');
+            SELECT 'intake_delete=' || has_table_privilege('appts_runtime','appts.intake_cue','DELETE');
+            SELECT 'intake_truncate=' || has_table_privilege('appts_runtime','appts.intake_cue','TRUNCATE');
+            SELECT 'source_observation_insert=' || has_table_privilege('appts_runtime','appts.source_observation','INSERT');
+            SELECT 'source_observation_select=' || has_table_privilege('appts_runtime','appts.source_observation','SELECT');
+            SELECT 'source_observation_update=' || has_table_privilege('appts_runtime','appts.source_observation','UPDATE');
+            SELECT 'source_observation_delete=' || has_table_privilege('appts_runtime','appts.source_observation','DELETE');
+            SELECT 'source_observation_truncate=' || has_table_privilege('appts_runtime','appts.source_observation','TRUNCATE');
+            SELECT 'idempotency_select=' || has_table_privilege('appts_runtime','appts.idempotency_ledger','SELECT');
+            SELECT 'idempotency_insert=' || has_table_privilege('appts_runtime','appts.idempotency_ledger','INSERT');
+            SELECT 'idempotency_update=' || has_table_privilege('appts_runtime','appts.idempotency_ledger','UPDATE');
+            SELECT 'idempotency_delete=' || has_table_privilege('appts_runtime','appts.idempotency_ledger','DELETE');
+            SELECT 'runtime_table_grants=' || count(*) FROM information_schema.role_table_grants WHERE grantee='appts_runtime';
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      changed_when: false
+      register: privilege_matrix
+
+    - name: Require Stage 3.2 health, projection, runtime identity, and security contract
+      ansible.builtin.assert:
+        that:
+          - healthz.json.status == 'ok'
+          - readyz.json.status == 'ready'
+          - work_queue_probe.json.view_id == 'UX-RS-01'
+          - intake_probe.json.view_id == 'UX-RS-02'
+          - "'\"env_user\":\"appts_runtime\"' in api_db_identity.stdout"
+          - "'\"env_db\":\"appts_dep001_independent\"' in api_db_identity.stdout"
+          - "'\"db_user\":\"appts_runtime\"' in api_db_identity.stdout"
+          - "'role_flags=false|false|false|false|false|false|true' in privilege_matrix.stdout_lines"
+          - "'membership_count=0' in privilege_matrix.stdout_lines"
+          - "'db_connect=true' in privilege_matrix.stdout_lines"
+          - "'db_temporary=false' in privilege_matrix.stdout_lines"
+          - "'appts_usage=true' in privilege_matrix.stdout_lines"
+          - "'appts_create=false' in privilege_matrix.stdout_lines"
+          - "'appts_sys_usage=false' in privilege_matrix.stdout_lines"
+          - "'intake_insert=true' in privilege_matrix.stdout_lines"
+          - "'intake_select=false' in privilege_matrix.stdout_lines"
+          - "'intake_update=false' in privilege_matrix.stdout_lines"
+          - "'intake_delete=false' in privilege_matrix.stdout_lines"
+          - "'intake_truncate=false' in privilege_matrix.stdout_lines"
+          - "'source_observation_insert=true' in privilege_matrix.stdout_lines"
+          - "'source_observation_select=false' in privilege_matrix.stdout_lines"
+          - "'source_observation_update=false' in privilege_matrix.stdout_lines"
+          - "'source_observation_delete=false' in privilege_matrix.stdout_lines"
+          - "'source_observation_truncate=false' in privilege_matrix.stdout_lines"
+          - "'idempotency_select=true' in privilege_matrix.stdout_lines"
+          - "'idempotency_insert=true' in privilege_matrix.stdout_lines"
+          - "'idempotency_update=false' in privilege_matrix.stdout_lines"
+          - "'idempotency_delete=false' in privilege_matrix.stdout_lines"
+        fail_msg: "BLOCKED: Stage 3.2 runtime identity/security/projection state differs from MCR-to-DT-012"
+
+    - name: Capture bounded API log tail
+      ansible.builtin.command:
+        argv: [docker, compose, -f, compose.yaml, --env-file, .env, logs, --no-color, --tail, "100", api]
       args:
         chdir: "{{ appts_compose_dir }}"
       changed_when: false
       register: api_logs
 
-    - name: Capture PostgreSQL identity read-only
-      ansible.builtin.command:
-        argv:
-          - docker
-          - compose
-          - -f
-          - compose.yaml
-          - --env-file
-          - .env
-          - exec
-          - -T
-          - postgres
-          - sh
-          - -c
-          - >-
-            psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc
-            "SELECT version(); SELECT current_database(); SELECT current_user;"
-      args:
-        chdir: "{{ appts_compose_dir }}"
-      changed_when: false
-      register: postgres_identity
-
-    - name: Capture runtime database role privilege flags read-only
-      ansible.builtin.command:
-        argv:
-          - docker
-          - compose
-          - -f
-          - compose.yaml
-          - --env-file
-          - .env
-          - exec
-          - -T
-          - postgres
-          - sh
-          - -c
-          - >-
-            psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc
-            "SELECT rolname || '|superuser=' || rolsuper || '|createdb=' || rolcreatedb || '|createrole=' || rolcreaterole FROM pg_catalog.pg_roles WHERE rolname = current_user;"
-      args:
-        chdir: "{{ appts_compose_dir }}"
-      changed_when: false
-      register: postgres_role_flags
-
-    - name: Report status and UI composition evidence
+    - name: Report status and exact security evidence
       ansible.builtin.debug:
         msg:
           - "healthz={{ healthz.content }}"
           - "readyz={{ readyz.content }}"
           - "root_http_status={{ root_http.status }}"
-          - "root_contains_server_projection_required={{ 'Current server projection required.' in root_http.content }}"
-          - "api_probe_status={{ api_probe.status }}"
-          - "work_queue_status={{ work_queue_probe.status }}"
-          - "work_queue_content={{ work_queue_probe.content }}"
-          - "intake_status={{ intake_probe.status }}"
-          - "intake_content={{ intake_probe.content }}"
-          - "intents_get_status={{ intents_get_probe.status }}"
-          - "intents_get_content={{ intents_get_probe.content }}"
+          - "work_queue={{ work_queue_probe.json }}"
+          - "intake={{ intake_probe.json }}"
+          - "api_db_identity={{ api_db_identity.stdout }}"
+          - "privilege_matrix={{ privilege_matrix.stdout_lines }}"
           - "compose_ps={{ compose_ps.stdout_lines }}"
           - "api_logs={{ api_logs.stdout_lines }}"
-          - "postgres_identity={{ postgres_identity.stdout_lines }}"
-          - "postgres_role_flags={{ postgres_role_flags.stdout }}"
