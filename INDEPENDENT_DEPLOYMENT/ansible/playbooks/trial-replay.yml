@@ -9,6 +9,9 @@
     appts_db_secret_file: /etc/appts-independent/db-secrets.json
     appts_db_name: appts_dep001_independent
     appts_admin_user: appts_admin
+    trial_source_src: "{{ playbook_dir }}/../../../SOURCE_SNAPSHOT/RESTORE_SERVICE/"
+    trial_source_dir: /opt/appts-independent-trial-source
+    trial_source_archive: /tmp/appts-independent-trial-source.tar.gz
     trial_runner_image: appts-independent-td-pre-001-runner:experimental
     trial_dockerfile: /tmp/appts-dt-td-pre-001.Dockerfile
     trial_env_file: /tmp/appts-dt-td-pre-001.env
@@ -19,6 +22,8 @@
     trial_fixture_src: "{{ playbook_dir }}/../../trial-fixtures/td-sim-001-fixtures.json"
     trial_loader_src: "{{ playbook_dir }}/../../trial/pg-envelope-loader.mjs"
     trial_fixture_sha256: 48bd9c7c87c68f485df7bbfcb014ac5bedf61def11ed9e9d8fe0d9cc5f0bbee5
+    accepted_lock_working_sha256: f508b48b35b3b6b674c9196e80e26fc03c09e10654c502f8c36f840350f2f8bd
+    accepted_lock_lf_normalized_sha256: d0abd3bbe8e845dad0abe4559747d7edb437e04878237b22959bad9c8f9c0d5f
     trial_disclosure_label_ref: 6f79da70-412f-469e-bcf7-f544f81b8aa7
     trial_idempotency_key: 9fbb1d1f-6d19-4ee1-9361-50c31560d107
     source_hash_expectations:
@@ -32,8 +37,6 @@
         sha256: 42c5387ba22312987b21b3fe4b0305a66fd7926750c686afac8bf30f93aaa98d
       - path: tools/td-pre-001-governed-replay.mjs
         sha256: 0fb10a88584737541d0cbe88bc026a1c765fa5aab4e3a64964068ef8a35f0e1d
-      - path: package-lock.json
-        sha256: f508b48b35b3b6b674c9196e80e26fc03c09e10654c502f8c36f840350f2f8bd
 
   tasks:
     - name: Require existing isolated deployment material
@@ -58,20 +61,82 @@
           - db_secret_state.stat.exists
         fail_msg: "BLOCKED: existing DT admin credential binding is absent"
 
-    - name: Verify accepted transfer-overlay hashes in installed source
+    - name: Package accepted SOURCE_SNAPSHOT root once on Actions runner
+      ansible.builtin.command:
+        argv:
+          - tar
+          - -C
+          - "{{ trial_source_src }}"
+          - -czf
+          - "{{ trial_source_archive }}"
+          - .
+      delegate_to: localhost
+      become: false
+      changed_when: true
+
+    - name: Reset isolated temporary Trial source root
+      ansible.builtin.file:
+        path: "{{ trial_source_dir }}"
+        state: absent
+
+    - name: Create isolated temporary Trial source root
+      ansible.builtin.file:
+        path: "{{ trial_source_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Transfer accepted SOURCE_SNAPSHOT root to isolated Trial source root
+      ansible.builtin.unarchive:
+        src: "{{ trial_source_archive }}"
+        dest: "{{ trial_source_dir }}/"
+        owner: root
+        group: root
+
+    - name: Remove runner-side temporary Trial source archive
+      ansible.builtin.file:
+        path: "{{ trial_source_archive }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+      changed_when: true
+
+    - name: Verify exact accepted source hashes in SOURCE_SNAPSHOT Trial root
       ansible.builtin.stat:
-        path: "{{ appts_install_dir }}/{{ item.path }}"
+        path: "{{ trial_source_dir }}/{{ item.path }}"
         checksum_algorithm: sha256
       loop: "{{ source_hash_expectations }}"
       register: source_hash_results
 
-    - name: Require exact accepted transfer-overlay hashes
+    - name: Require exact accepted source hashes
       ansible.builtin.assert:
         that:
           - item.stat.exists
           - item.stat.checksum == item.item.sha256
-        fail_msg: "BLOCKED: accepted transfer-overlay hash mismatch at {{ item.item.path }}"
+        fail_msg: "BLOCKED: accepted source hash mismatch at {{ item.item.path }}"
       loop: "{{ source_hash_results.results }}"
+
+    - name: Capture repository-form package-lock raw SHA-256
+      ansible.builtin.stat:
+        path: "{{ trial_source_dir }}/package-lock.json"
+        checksum_algorithm: sha256
+      register: trial_lock_stat
+
+    - name: Compute LF-normalized package-lock SHA-256
+      ansible.builtin.command:
+        argv:
+          - python3.9
+          - -c
+          - "import hashlib,pathlib; b=pathlib.Path('{{ trial_source_dir }}/package-lock.json').read_bytes().replace(b'\\r\\n',b'\\n'); print(hashlib.sha256(b).hexdigest())"
+      register: trial_lock_normalized
+      changed_when: false
+
+    - name: Require CODEX058 accepted package-lock dependency-equivalent representation
+      ansible.builtin.assert:
+        that:
+          - trial_lock_normalized.stdout == accepted_lock_lf_normalized_sha256
+        fail_msg: "BLOCKED: SOURCE_SNAPSHOT package-lock is not the CODEX058 accepted newline-equivalent dependency state"
 
     - name: Read persisted existing DT DB credentials
       ansible.builtin.slurp:
@@ -197,7 +262,7 @@
           RUN npm ci --ignore-scripts --no-audit --no-fund
           ENTRYPOINT ["node","--experimental-strip-types","--experimental-loader","/harness/pg-envelope-loader.mjs","tools/td-pre-001-governed-replay.mjs"]
 
-    - name: Build governed Trial runner from current installed accepted dependency state
+    - name: Build governed Trial runner from accepted SOURCE_SNAPSHOT dependency state
       ansible.builtin.command:
         argv:
           - docker
@@ -210,7 +275,7 @@
           - "{{ trial_dockerfile }}"
           - -t
           - "{{ trial_runner_image }}"
-          - "{{ appts_install_dir }}"
+          - "{{ trial_source_dir }}"
       changed_when: true
 
     - name: Execute governed replay and readback with temporary credential envelope
@@ -323,6 +388,9 @@
               - "pre_counts={{ pre_counts.stdout_lines }}"
               - "readback={{ replay_readback.stdout_lines }}"
               - "fixture_sha256={{ trial_fixture_stat.stat.checksum }}"
+              - "repository_lock_raw_sha256={{ trial_lock_stat.stat.checksum }}"
+              - "accepted_lock_working_sha256={{ accepted_lock_working_sha256 }}"
+              - "repository_lock_lf_normalized_sha256={{ trial_lock_normalized.stdout }}"
               - "No direct canonical SQL seeding, DB role creation, schema mutation, or credential broadening was used."
       always:
         - name: Remove temporary Trial credential envelope
