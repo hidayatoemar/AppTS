@@ -149,7 +149,7 @@
               ('{{ http_proof_json.sequential.created.caseId }}'::uuid,'{{ http_proof_json["keys"]["sequential"] }}'::uuid),
               ('{{ http_proof_json.identical_concurrency.created.caseId }}'::uuid,'{{ http_proof_json["keys"]["identical"] }}'::uuid),
               ('{{ http_proof_json.mixed_concurrency.seed.caseId }}'::uuid,'{{ http_proof_json["keys"]["mixed"] }}'::uuid))
-            SELECT 'ledger_map_count=' || count(*) FROM appts.idempotency_ledger l JOIN expected e ON e.idem_key=l.idempotency_key AND e.case_id=l.durable_result_ref WHERE l.owner_domain_ref='APPTS.CORE.D01.PRETICKET_ADMISSION.OWNER';
+            SELECT 'ledger_map_count=' || count(*) FROM appts.idempotency_ledger l JOIN expected e ON e.idem_key=l.idempotency_key AND e.case_id::text=l.durable_result_ref WHERE l.owner_domain_ref='APPTS.CORE.D01.PRETICKET_ADMISSION.OWNER';
             WITH expected(case_id) AS (VALUES
               ('{{ http_proof_json.sequential.created.caseId }}'::uuid),
               ('{{ http_proof_json.identical_concurrency.created.caseId }}'::uuid),
