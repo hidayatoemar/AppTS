@@ -153,6 +153,7 @@ jobs:
               "runtime quarantine verifies with a shell-level fake client and then STOPs",
               "all database entrypoint scripts use the explicit network guard",
               "schema freeze guard passes without mutating the deployment source",
+              "failing tests:",
           }
           def names(path):
               result=[]
