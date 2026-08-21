@@ -1,0 +1,175 @@
+---
+- name: Verify governed TD-PRE-001 through admitted HTTP UI intent path
+  hosts: independent
+  become: true
+  gather_facts: false
+  vars:
+    appts_compose_dir: /opt/appts-independent-restore-service/deploy/compose
+    trial_idempotency_key: 9fbb1d1f-6d19-4ee1-9361-50c31560d107
+    intent_contract_ref: "APPTS.CORE.D01.PRETICKET_ADMISSION.SUBMISSION / 1.0.0"
+
+  tasks:
+    - name: Read Work Queue before governed HTTP interaction
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/api/v1/ui/work-queue
+        method: GET
+        status_code: 200
+        return_content: true
+      register: work_before
+
+    - name: Read Intake before governed HTTP interaction
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/api/v1/ui/intake
+        method: GET
+        status_code: 200
+        return_content: true
+      register: intake_before
+
+    - name: Require preserved governed TD-PRE-001 browser projection before interaction
+      ansible.builtin.assert:
+        that:
+          - work_before.json.view_id == 'UX-RS-01'
+          - work_before.json.data.ticket_count == 0
+          - intake_before.json.view_id == 'UX-RS-02'
+          - intake_before.json.data.case_count >= 1
+          - intake_before.json.data.cases[0].case_status_ref == 'HOLD_AS_PRE_TICKET'
+          - intake_before.json.data.cases[0].assessment_result == 'NOT_ACCEPTABLE'
+          - intake_before.json.data.cases[0].completeness_result == 'MISSING'
+        fail_msg: "BLOCKED: preserved TD-PRE-001 projection is not the accepted pre-ticket hold state"
+
+    - name: Generate mechanical HTTP message identity
+      ansible.builtin.command: python3.9 -c "import uuid; print(uuid.uuid4())"
+      register: http_message_id
+      changed_when: false
+
+    - name: Generate mechanical HTTP correlation identity
+      ansible.builtin.command: python3.9 -c "import uuid; print(uuid.uuid4())"
+      register: http_correlation_id
+      changed_when: false
+
+    - name: Execute identical governed TD-PRE-001 through admitted HTTP intent path
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/api/v1/ui/intents
+        method: POST
+        body_format: json
+        body:
+          intent_contract_ref: "{{ intent_contract_ref }}"
+          payload:
+            messageId: "{{ http_message_id.stdout }}"
+            idempotencyKey: "{{ trial_idempotency_key }}"
+            correlationId: "{{ http_correlation_id.stdout }}"
+        status_code: 200
+        return_content: true
+      register: http_replay
+
+    - name: Require HTTP idempotent replay and same preserved case identity
+      ansible.builtin.assert:
+        that:
+          - http_replay.json.disposition == 'IDEMPOTENT_REPLAY'
+          - http_replay.json.caseId == intake_before.json.data.cases[0].case_id
+        fail_msg: "BLOCKED: admitted HTTP intent path did not preserve TD-PRE-001 idempotency"
+
+    - name: Generate mechanical conflict message identity
+      ansible.builtin.command: python3.9 -c "import uuid; print(uuid.uuid4())"
+      register: conflict_message_id
+      changed_when: false
+
+    - name: Generate mechanical conflict correlation identity
+      ansible.builtin.command: python3.9 -c "import uuid; print(uuid.uuid4())"
+      register: conflict_correlation_id
+      changed_when: false
+
+    - name: Execute materially changed same-key HTTP probe
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/api/v1/ui/intents
+        method: POST
+        body_format: json
+        body:
+          intent_contract_ref: "{{ intent_contract_ref }}"
+          payload:
+            messageId: "{{ conflict_message_id.stdout }}"
+            idempotencyKey: "{{ trial_idempotency_key }}"
+            correlationId: "{{ conflict_correlation_id.stdout }}"
+            conflictProbe: true
+        status_code: 200
+        return_content: true
+      register: http_conflict
+
+    - name: Require HTTP conflict hold
+      ansible.builtin.assert:
+        that:
+          - http_conflict.json.disposition == 'CONFLICT_HOLD'
+        fail_msg: "BLOCKED: materially changed same-key HTTP intent did not fail closed as CONFLICT_HOLD"
+
+    - name: Read Work Queue after governed HTTP interaction
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/api/v1/ui/work-queue
+        method: GET
+        status_code: 200
+        return_content: true
+      register: work_after
+
+    - name: Read Intake after governed HTTP interaction
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/api/v1/ui/intake
+        method: GET
+        status_code: 200
+        return_content: true
+      register: intake_after
+
+    - name: Capture zero-Ticket and pre-ticket readback
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - exec
+          - -T
+          - postgres
+          - psql
+          - -X
+          - -U
+          - appts_admin
+          - -d
+          - appts_dep001_independent
+          - -Atqc
+          - >-
+            SELECT 'ticket_identity=' || count(*) FROM appts.ticket_identity;
+            SELECT 'ticket_formation=' || count(*) FROM appts.ticket_formation_record;
+            SELECT 'runtime_ticket=' || count(*) FROM appts.runtime_ticket;
+            SELECT 'pre_ticket_case=' || count(*) FROM appts.pre_ticket_case;
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      register: db_readback
+      changed_when: false
+
+    - name: Require preserved hold projection and zero downstream Ticket after HTTP interaction
+      ansible.builtin.assert:
+        that:
+          - work_after.json.view_id == 'UX-RS-01'
+          - work_after.json.data.ticket_count == 0
+          - intake_after.json.view_id == 'UX-RS-02'
+          - intake_after.json.data.case_count == intake_before.json.data.case_count
+          - intake_after.json.data.cases[0].case_id == intake_before.json.data.cases[0].case_id
+          - intake_after.json.data.cases[0].case_status_ref == 'HOLD_AS_PRE_TICKET'
+          - intake_after.json.data.cases[0].assessment_result == 'NOT_ACCEPTABLE'
+          - intake_after.json.data.cases[0].completeness_result == 'MISSING'
+          - "'ticket_identity=0' in db_readback.stdout_lines"
+          - "'ticket_formation=0' in db_readback.stdout_lines"
+          - "'runtime_ticket=0' in db_readback.stdout_lines"
+          - "'pre_ticket_case=1' in db_readback.stdout_lines"
+        fail_msg: "BLOCKED: HTTP interaction changed accepted pre-ticket/Ticket boundaries"
+
+    - name: Report safe HTTP Trial evidence
+      ansible.builtin.debug:
+        msg:
+          - "work_before={{ work_before.json }}"
+          - "intake_before={{ intake_before.json }}"
+          - "http_replay={{ http_replay.json }}"
+          - "http_conflict={{ http_conflict.json }}"
+          - "work_after={{ work_after.json }}"
+          - "intake_after={{ intake_after.json }}"
+          - "db_readback={{ db_readback.stdout_lines }}"
