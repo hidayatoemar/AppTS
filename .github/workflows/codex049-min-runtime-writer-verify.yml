@@ -1,0 +1,260 @@
+name: CODEX049 final runtime and transfer verification
+
+on:
+  push:
+    branches: [mcr/codex049-min-runtime-writer-verify]
+  pull_request:
+    branches: [experiment/independent-restore-deploy]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17.11-bookworm
+        env:
+          POSTGRES_PASSWORD: codex049-superuser-local-only
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mcr/codex049-min-runtime-writer-verify
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+
+      - name: Exact base toolchain and deterministic candidate construction
+        working-directory: .
+        run: |
+          set -euo pipefail
+          base=7a813276bf5e4d5e73a48cc6276141f3b9b4d0c5
+          root='DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001'
+          test "$(git rev-parse HEAD^)" = "$base"
+          test -z "$(git diff --name-only "$base" -- "$root")"
+          printf '%s\n' "$base" >/tmp/codex049-base
+          mkdir -p "$RUNNER_TEMP/codex049-final-evidence"
+          npm install --global npm@11.17.0
+          test "$(node --version)" = 'v24.19.0'
+          test "$(npm --version)" = '11.17.0'
+          cd "$root"
+          test "$(sha256sum package-lock.json | awk '{print $1}')" = '60f1e9e7e0ba9993c9340af9344790440298f9e2fe861ed50f50c14f2cc7170c'
+          npm ci --ignore-scripts --no-audit --no-fund
+          python3 - <<'PY'
+          from pathlib import Path
+          source=Path('apps/api/src/trial/pre-ticket-trial-owner-flow.ts')
+          text=source.read_text()
+          def once(a,b):
+              global text
+              if text.count(a) != 1: raise SystemExit(f'source match count {text.count(a)}')
+              text=text.replace(a,b,1)
+          marker='const byteDigest = (value: string): Buffer => createHash("sha256").update(value).digest();\n'
+          once(marker, marker+'''\nfunction idempotencyAdvisoryLockKey(idempotencyKey: string): string {\n  return createHash("sha256")\n    .update(OWNER_DOMAIN)\n    .update("\\0")\n    .update(idempotencyKey)\n    .digest()\n    .readBigInt64BE(0)\n    .toString();\n}\n''')
+          once('async function inTransaction<Result>(pool: PersistencePool, work: (client: PersistenceClient) => Promise<Result>): Promise<Result> {\n','type TransactionIsolation = "SERIALIZABLE" | "READ COMMITTED";\n\nasync function inTransaction<Result>(pool: PersistencePool, work: (client: PersistenceClient) => Promise<Result>, isolation: TransactionIsolation = "SERIALIZABLE"): Promise<Result> {\n')
+          once('    await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");\n','    await client.query(`BEGIN ISOLATION LEVEL ${isolation}`);\n')
+          once('  return inTransaction(pool, async (client) => {\n    const prior = await client.query<{ payload_hash: string; durable_result_ref: string }>(\n      "SELECT payload_hash,durable_result_ref::text AS durable_result_ref FROM appts.idempotency_ledger WHERE owner_domain_ref=$1 AND idempotency_key=$2 FOR UPDATE",\n','  return inTransaction(pool, async (client) => {\n    await client.query("SELECT pg_advisory_xact_lock($1::bigint)", [idempotencyAdvisoryLockKey(submission.idempotencyKey)]);\n    const prior = await client.query<{ payload_hash: string; durable_result_ref: string }>(\n      "SELECT payload_hash,durable_result_ref::text AS durable_result_ref FROM appts.idempotency_ledger WHERE owner_domain_ref=$1 AND idempotency_key=$2",\n')
+          once('    return { disposition: "CREATED", caseId, cueId, observationId };\n  });\n}\n\nasync function ptx02And03','    return { disposition: "CREATED", caseId, cueId, observationId };\n  }, "READ COMMITTED");\n}\n\nasync function ptx02And03')
+          source.write_text(text)
+          grants=Path('deploy/db/grant-runtime.sh')
+          g=grants.read_text()
+          anchor='-- Mutable tables (SELECT + INSERT + UPDATE; no DELETE)\n'
+          if g.count(anchor) != 1: raise SystemExit('grant anchor mismatch')
+          if 'appts.intake_cue' in g or 'appts.source_observation' in g: raise SystemExit('target already granted')
+          exact='''-- MCR-to-CODEX-049 Trial owner-flow writer completion.\n-- Exact bounded authority: INSERT only; no SELECT/UPDATE/DELETE/TRUNCATE.\nGRANT INSERT ON TABLE\n  appts.intake_cue, appts.source_observation\nTO :"runtime_role";\n\n'''
+          grants.write_text(g.replace(anchor,exact+anchor,1))
+          PY
+          cat > tests/dep001/idempotency-minimum-runtime-writer.test.mjs <<'EOF'
+          import assert from "node:assert/strict";
+          import { readFile } from "node:fs/promises";
+          import test from "node:test";
+          const source=await readFile(new URL("../../apps/api/src/trial/pre-ticket-trial-owner-flow.ts",import.meta.url),"utf8");
+          const grants=await readFile(new URL("../../deploy/db/grant-runtime.sh",import.meta.url),"utf8");
+          test("idempotency serialization no longer requires ledger UPDATE privilege",()=>{assert.match(source,/pg_advisory_xact_lock\(\$1::bigint\)/);assert.match(source,/READ COMMITTED/);assert.doesNotMatch(source,/idempotency_ledger[^\n]*FOR UPDATE/);});
+          test("MCR049 writer completion is INSERT-only for exactly the two authorized tables",()=>{assert.match(grants,/GRANT INSERT ON TABLE\s+appts\.intake_cue, appts\.source_observation\s+TO :"runtime_role";/s);assert.equal((grants.match(/appts\.intake_cue/g)??[]).length,1);assert.equal((grants.match(/appts\.source_observation/g)??[]).length,1);assert.doesNotMatch(grants,/SECURITY DEFINER/i);});
+          EOF
+          git add -N -- tests/dep001/idempotency-minimum-runtime-writer.test.mjs
+          git diff --check
+          node --test tests/dep001/idempotency-minimum-runtime-writer.test.mjs
+          cd ../..
+          git diff --name-only "$base" -- "$root" | tee "$RUNNER_TEMP/codex049-final-evidence/changed-files.txt"
+          cat >/tmp/expected <<EOF
+          $root/apps/api/src/trial/pre-ticket-trial-owner-flow.ts
+          $root/deploy/db/grant-runtime.sh
+          $root/tests/dep001/idempotency-minimum-runtime-writer.test.mjs
+          EOF
+          diff -u /tmp/expected "$RUNNER_TEMP/codex049-final-evidence/changed-files.txt"
+          sha256sum "$root/apps/api/src/trial/pre-ticket-trial-owner-flow.ts" "$root/deploy/db/grant-runtime.sh" "$root/tests/dep001/idempotency-minimum-runtime-writer.test.mjs" | tee "$RUNNER_TEMP/codex049-final-evidence/candidate-file-sha256.txt"
+          cd "$root"
+          npm run verify:boundaries 2>&1 | tee "$RUNNER_TEMP/codex049-final-evidence/verify-boundaries.log"
+          npm run typecheck 2>&1 | tee "$RUNNER_TEMP/codex049-final-evidence/typecheck.log"
+          npm run build 2>&1 | tee "$RUNNER_TEMP/codex049-final-evidence/build.log"
+
+      - name: Disposable PostgreSQL 17 split identities and exact privilege proof
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/codex049-final-evidence"
+          pgcid="$(docker ps --filter ancestor=postgres:17.11-bookworm -q | head -n1)"; test -n "$pgcid"
+          docker exec -e PGPASSWORD=codex049-superuser-local-only -i "$pgcid" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres <<'SQL'
+          CREATE ROLE appts_migration LOGIN PASSWORD 'codex049-migration-local-only' NOSUPERUSER INHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          CREATE ROLE appts_runtime LOGIN PASSWORD 'codex049-runtime-local-only' NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          CREATE DATABASE appts_dep001_codex049 OWNER appts_migration;
+          SQL
+          for f in db/migrations/V001__cf01_core_schema.sql db/migrations/V002__cf01_runtime_and_exchange_schema.sql db/migrations/V003__dg04_diagnostic_persistence.sql db/migrations/V004__d05_pending_capture_v2.sql; do
+            docker exec -e PGPASSWORD=codex049-migration-local-only -i "$pgcid" psql -X -v ON_ERROR_STOP=1 -U appts_migration -d appts_dep001_codex049 < "$f"
+          done
+          docker exec -e PGPASSWORD=codex049-migration-local-only "$pgcid" psql -X -At -U appts_migration -d appts_dep001_codex049 -c "SELECT current_setting('server_version');" | tee "$evidence/postgresql-version.txt"
+          docker cp deploy/db "$pgcid:/tmp/codex049-db"
+          docker exec "$pgcid" chmod +x /tmp/codex049-db/grant-runtime.sh
+          docker exec -e PGHOST=127.0.0.1 -e PGPORT=5432 -e PGDATABASE=appts_dep001_codex049 -e PGUSER=appts_migration -e PGPASSWORD=codex049-migration-local-only -e APPTS_DB_NAME=appts_dep001_codex049 -e APPTS_MIGRATION_ROLE=appts_migration -e APPTS_RUNTIME_ROLE=appts_runtime -e 'APPTS_STAGING_LABEL=STAGING SIMULATION / NON-PRODUCTION' -e APPTS_DISPOSABLE_DATABASE=true -e APPTS_DB_NETWORK_MODE=LOOPBACK "$pgcid" /tmp/codex049-db/grant-runtime.sh 2>&1 | tee "$evidence/grant-runtime.log"
+          docker exec -e PGPASSWORD=codex049-migration-local-only "$pgcid" psql -X -P pager=off -U appts_migration -d appts_dep001_codex049 -c "SELECT table_name,string_agg(privilege_type,',' ORDER BY privilege_type) AS privileges FROM information_schema.role_table_grants WHERE grantee='appts_runtime' AND table_schema='appts' AND table_name IN ('intake_cue','source_observation','idempotency_ledger','pre_ticket_case','source_ref','commit_marker','inbox_entry','audit_event','admission_assessment','admission_predicate_result','intake_decision') GROUP BY table_name ORDER BY table_name;" | tee "$evidence/privilege-matrix.txt"
+          exact="$(docker exec -e PGPASSWORD=codex049-migration-local-only "$pgcid" psql -X -At -F '|' -U appts_migration -d appts_dep001_codex049 -c "SELECT has_table_privilege('appts_runtime','appts.intake_cue','INSERT'),has_table_privilege('appts_runtime','appts.intake_cue','SELECT'),has_table_privilege('appts_runtime','appts.intake_cue','UPDATE'),has_table_privilege('appts_runtime','appts.intake_cue','DELETE'),has_table_privilege('appts_runtime','appts.intake_cue','TRUNCATE'),has_table_privilege('appts_runtime','appts.source_observation','INSERT'),has_table_privilege('appts_runtime','appts.source_observation','SELECT'),has_table_privilege('appts_runtime','appts.source_observation','UPDATE'),has_table_privilege('appts_runtime','appts.source_observation','DELETE'),has_table_privilege('appts_runtime','appts.source_observation','TRUNCATE');")"
+          echo "writer_exact=$exact" | tee "$evidence/writer-exact.txt"
+          test "$exact" = 't|f|f|f|f|t|f|f|f|f'
+          ledger="$(docker exec -e PGPASSWORD=codex049-migration-local-only "$pgcid" psql -X -At -F '|' -U appts_migration -d appts_dep001_codex049 -c "SELECT has_table_privilege('appts_runtime','appts.idempotency_ledger','SELECT'),has_table_privilege('appts_runtime','appts.idempotency_ledger','INSERT'),has_table_privilege('appts_runtime','appts.idempotency_ledger','UPDATE'),has_table_privilege('appts_runtime','appts.idempotency_ledger','DELETE');")"
+          echo "ledger=$ledger" | tee "$evidence/ledger-exact.txt"
+          test "$ledger" = 't|t|f|f'
+
+      - name: Actual appts_runtime HTTP replay conflict and concurrency proof
+        env:
+          DATABASE_URL: postgresql://appts_runtime:codex049-runtime-local-only@127.0.0.1:5432/appts_dep001_codex049
+          API_LISTEN_PORT: '8080'
+          APPTS_TRIAL_DISCLOSURE_LABEL_REF: 6f79da70-412f-469e-bcf7-f544f81b8aa7
+          EVIDENCE_DIR: ${{ runner.temp }}/codex049-final-evidence
+        run: |
+          set -euo pipefail
+          node apps/api/dist/dep-bootstrap.js >"$EVIDENCE_DIR/api.log" 2>&1 & api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true; wait "$api_pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do curl --fail --silent http://127.0.0.1:8080/healthz >/dev/null && break || sleep 1; done
+          curl --fail --silent http://127.0.0.1:8080/healthz | tee "$EVIDENCE_DIR/healthz.json"
+          curl --fail --silent http://127.0.0.1:8080/readyz | tee "$EVIDENCE_DIR/readyz.json"
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from 'node:fs';
+          const base='http://127.0.0.1:8080';
+          const endpoint=`${base}/api/v1/ui/intents`;
+          const contract='APPTS.CORE.D01.PRETICKET_ADMISSION.SUBMISSION / 1.0.0';
+          const evidenceDir=process.env.EVIDENCE_DIR;
+          const assert=(c,m)=>{if(!c)throw new Error(m)};
+          async function json(url,options){const r=await fetch(url,options);const t=await r.text();let b;try{b=JSON.parse(t)}catch{throw new Error(`${r.status} non-JSON: ${t}`)}if(!r.ok)throw new Error(`${r.status}: ${JSON.stringify(b)}`);return b}
+          const get=p=>json(`${base}${p}`);
+          const post=p=>json(endpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({intent_contract_ref:contract,payload:p})});
+          const payload=(messageId,idempotencyKey,correlationId,conflictProbe=false)=>({messageId,idempotencyKey,correlationId,trialContext:'TD-PRE-001',...(conflictProbe?{conflictProbe:true}:{})});
+          const assertCreated=x=>{assert(x.disposition==='CREATED',`expected CREATED ${JSON.stringify(x)}`);assert(x.assessmentResult==='NOT_ACCEPTABLE',`assessment ${JSON.stringify(x)}`);assert(x.decision==='HOLD_AS_PRE_TICKET',`decision ${JSON.stringify(x)}`);assert(typeof x.caseId==='string','caseId')};
+          const initialWq=await get('/api/v1/ui/work-queue');
+          const initialIntake=await get('/api/v1/ui/intake');
+          assert(initialWq?.data?.ticket_count===0,`initial tickets ${JSON.stringify(initialWq)}`);
+          assert(initialIntake?.data?.case_count===0,`initial cases ${JSON.stringify(initialIntake)}`);
+          const p1=payload('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001');
+          const first=await post(p1);assertCreated(first);
+          const replay=await post(p1);assert(replay.disposition==='IDEMPOTENT_REPLAY'&&replay.caseId===first.caseId,`replay ${JSON.stringify(replay)}`);
+          const conflict=await post({...p1,conflictProbe:true});assert(conflict.disposition==='CONFLICT_HOLD',`conflict ${JSON.stringify(conflict)}`);
+          const p2=payload('10000000-0000-4000-8000-000000000010','20000000-0000-4000-8000-000000000010','30000000-0000-4000-8000-000000000010');
+          const identical=await Promise.all(Array.from({length:8},()=>post(p2)));
+          const ic=identical.filter(x=>x.disposition==='CREATED'),ir=identical.filter(x=>x.disposition==='IDEMPOTENT_REPLAY');
+          assert(ic.length===1&&ir.length===7,`identical counts ${JSON.stringify(identical)}`);assertCreated(ic[0]);assert(ir.every(x=>x.caseId===ic[0].caseId),'identical identity drift');
+          const normal=payload('10000000-0000-4000-8000-000000000020','20000000-0000-4000-8000-000000000020','30000000-0000-4000-8000-000000000020');
+          const changed={...normal,conflictProbe:true};
+          const mixed=await Promise.all([normal,changed,normal,changed,normal,changed,normal,changed].map(post));
+          const mc=mixed.filter(x=>x.disposition==='CREATED'),mr=mixed.filter(x=>x.disposition==='IDEMPOTENT_REPLAY'),mh=mixed.filter(x=>x.disposition==='CONFLICT_HOLD');
+          assert(mc.length===1&&mh.length>=1&&mixed.length===mc.length+mr.length+mh.length,`mixed ${JSON.stringify(mixed)}`);assertCreated(mc[0]);assert(mr.every(x=>x.caseId===mc[0].caseId),'mixed identity drift');
+          const finalWq=await get('/api/v1/ui/work-queue');
+          const finalIntake=await get('/api/v1/ui/intake');
+          assert(finalWq?.data?.ticket_count===0,`final tickets ${JSON.stringify(finalWq)}`);
+          assert(finalIntake?.data?.case_count===3,`final cases ${JSON.stringify(finalIntake)}`);
+          assert(finalIntake.data.cases.every(x=>x.case_status_ref==='HOLD_AS_PRE_TICKET'&&x.assessment_result==='NOT_ACCEPTABLE'&&x.decision_code==='HOLD_AS_PRE_TICKET'),`semantic drift ${JSON.stringify(finalIntake)}`);
+          const summary={first,replay,conflict,identical,mixed,initialWq,initialIntake,finalWq,finalIntake};
+          writeFileSync(`${evidenceDir}/runtime-summary.json`,JSON.stringify(summary,null,2));
+          console.log(JSON.stringify({first:first.disposition,replay:replay.disposition,conflict:conflict.disposition,identicalCreated:ic.length,identicalReplay:ir.length,mixedCreated:mc.length,mixedReplay:mr.length,mixedConflict:mh.length,finalCases:finalIntake.data.case_count,finalTickets:finalWq.data.ticket_count}));
+          NODE
+
+      - name: Database readback and zero downstream Ticket proof
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/codex049-final-evidence"
+          pgcid="$(docker ps --filter ancestor=postgres:17.11-bookworm -q | head -n1)"; test -n "$pgcid"
+          docker exec -e PGPASSWORD=codex049-migration-local-only "$pgcid" psql -X -P pager=off -U appts_migration -d appts_dep001_codex049 -c "SELECT 'intake_cue' AS object,count(*) FROM appts.intake_cue UNION ALL SELECT 'source_observation',count(*) FROM appts.source_observation UNION ALL SELECT 'pre_ticket_case',count(*) FROM appts.pre_ticket_case UNION ALL SELECT 'idempotency_ledger',count(*) FROM appts.idempotency_ledger UNION ALL SELECT 'admission_assessment',count(*) FROM appts.admission_assessment UNION ALL SELECT 'intake_decision',count(*) FROM appts.intake_decision UNION ALL SELECT 'ticket_identity',count(*) FROM appts.ticket_identity UNION ALL SELECT 'ticket_formation_record',count(*) FROM appts.ticket_formation_record UNION ALL SELECT 'runtime_ticket',count(*) FROM appts.runtime_ticket ORDER BY object;" | tee "$evidence/db-readback.txt"
+          counts="$(docker exec -e PGPASSWORD=codex049-migration-local-only "$pgcid" psql -X -At -F '|' -U appts_migration -d appts_dep001_codex049 -c "SELECT (SELECT count(*) FROM appts.intake_cue),(SELECT count(*) FROM appts.source_observation),(SELECT count(*) FROM appts.pre_ticket_case),(SELECT count(*) FROM appts.idempotency_ledger),(SELECT count(*) FROM appts.admission_assessment),(SELECT count(*) FROM appts.intake_decision),(SELECT count(*) FROM appts.ticket_identity),(SELECT count(*) FROM appts.ticket_formation_record),(SELECT count(*) FROM appts.runtime_ticket),(SELECT count(*) FROM appts.pre_ticket_case WHERE case_status_ref='HOLD_AS_PRE_TICKET'),(SELECT count(DISTINCT durable_result_ref) FROM appts.idempotency_ledger);")"
+          echo "counts=$counts" | tee "$evidence/db-counts.txt"
+          test "$counts" = '3|3|3|3|3|3|0|0|0|3|3'
+
+      - name: Build deterministic DT transfer content
+        working-directory: .
+        run: |
+          set -euo pipefail
+          base="$(cat /tmp/codex049-base)"
+          root='DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001'
+          pkg="$RUNNER_TEMP/CODEX049_DT_TRANSFER_v1.0_CONTROLLED"
+          mkdir -p "$pkg/overlay/$root/apps/api/src/trial" "$pkg/overlay/$root/deploy/db" "$pkg/overlay/$root/tests/dep001"
+          cp "$root/apps/api/src/trial/pre-ticket-trial-owner-flow.ts" "$pkg/overlay/$root/apps/api/src/trial/"
+          cp "$root/deploy/db/grant-runtime.sh" "$pkg/overlay/$root/deploy/db/"
+          cp "$root/tests/dep001/idempotency-minimum-runtime-writer.test.mjs" "$pkg/overlay/$root/tests/dep001/"
+          git diff --binary "$base" -- "$root/apps/api/src/trial/pre-ticket-trial-owner-flow.ts" "$root/deploy/db/grant-runtime.sh" "$root/tests/dep001/idempotency-minimum-runtime-writer.test.mjs" >"$pkg/CODEX049.patch"
+          cat >"$pkg/README.md" <<EOF
+          # CODEX049 DT TRANSFER v1.0 CONTROLLED
+          Authority: MCR-to-CODEX-049 / File ID 1JUtPGkp-ysdYvrVJZhWe3NZims9TbXjbE1Bh6StuWDc
+          Accepted application base: $base
+          Scope: idempotency ledger compatibility plus exact INSERT-only runtime writer completion for appts.intake_cue and appts.source_observation.
+          No Product/schema/migration semantic change. No Production/UAT/real-data authority. Build Pack remains frozen.
+          EOF
+          cat >"$pkg/APPLY.sh" <<'EOF'
+          #!/bin/sh
+          set -eu
+          repo=${1:-.}
+          base=7a813276bf5e4d5e73a48cc6276141f3b9b4d0c5
+          root=DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+          git -C "$repo" cat-file -e "$base^{commit}"
+          test -z "$(git -C "$repo" diff --name-only "$base" -- "$root/apps/api/src/trial/pre-ticket-trial-owner-flow.ts" "$root/deploy/db/grant-runtime.sh" "$root/tests/dep001/idempotency-minimum-runtime-writer.test.mjs")"
+          cp "$(dirname "$0")/overlay/$root/apps/api/src/trial/pre-ticket-trial-owner-flow.ts" "$repo/$root/apps/api/src/trial/pre-ticket-trial-owner-flow.ts"
+          install -m 0755 "$(dirname "$0")/overlay/$root/deploy/db/grant-runtime.sh" "$repo/$root/deploy/db/grant-runtime.sh"
+          cp "$(dirname "$0")/overlay/$root/tests/dep001/idempotency-minimum-runtime-writer.test.mjs" "$repo/$root/tests/dep001/idempotency-minimum-runtime-writer.test.mjs"
+          EOF
+          cat >"$pkg/APPLY_AND_VERIFY.md" <<'EOF'
+          # Apply and Verify
+          Apply only to a workspace matching accepted base 7a813276bf5e4d5e73a48cc6276141f3b9b4d0c5 for the three changed paths. Run `sh APPLY.sh <repo-root>`. Verify exact effective privileges: intake_cue INSERT only; source_observation INSERT only; idempotency_ledger SELECT+INSERT with no UPDATE/DELETE. Run focused test, architecture/typecheck/build, and accepted suites. Actual appts_runtime HTTP must produce CREATED / NOT_ACCEPTABLE / HOLD_AS_PRE_TICKET, identical replay with same case identity, changed same-key CONFLICT_HOLD, concurrency safety, owner-flow persistence, and zero downstream Ticket.
+          EOF
+          cat >"$pkg/VERIFICATION_SUMMARY.md" <<EOF
+          # Verification Summary
+          Full architecture/suite/baseline-equivalence run: 32519776780 (all gates through exact privilege matrix PASS; four stale DEP .mjs failures proven identical to exact accepted base).
+          Final actual-runtime/concurrency/transfer run: ${GITHUB_RUN_ID}.
+          Toolchain: Node 24.19.0 / npm 11.17.0 / PostgreSQL 17.11.
+          Candidate is deterministically reconstructed from exact accepted base in both runs.
+          EOF
+          python3 - "$pkg" <<'PY'
+          import hashlib,json,os,pathlib,sys
+          pkg=pathlib.Path(sys.argv[1]); files=[]
+          for p in sorted(x for x in (pkg/'overlay').rglob('*') if x.is_file()): files.append({'path':p.relative_to(pkg).as_posix(),'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          manifest={'transfer_id':'CODEX049_DT_TRANSFER_v1.0_CONTROLLED','authority':{'comm_id':'MCR-to-CODEX-049','file_id':'1JUtPGkp-ysdYvrVJZhWe3NZims9TbXjbE1Bh6StuWDc'},'accepted_application_base':'7a813276bf5e4d5e73a48cc6276141f3b9b4d0c5','changed_files':files,'security_boundary':{'intake_cue':['INSERT'],'source_observation':['INSERT'],'idempotency_ledger_allowed':['SELECT','INSERT'],'idempotency_ledger_denied':['UPDATE','DELETE']},'suite_evidence_run_id':'32519776780','final_runtime_run_id':os.environ['GITHUB_RUN_ID']}
+          (pkg/'MANIFEST.json').write_text(json.dumps(manifest,indent=2)+'\n')
+          PY
+          (cd "$pkg" && find overlay -type f -print0 | sort -z | xargs -0 sha256sum) >"$pkg/SHA256SUMS"
+          chmod 0755 "$pkg/APPLY.sh"
+          find "$pkg" -exec touch -h -t 202608220000 {} +
+
+      - name: Upload DT transfer
+        uses: actions/upload-artifact@v4
+        with:
+          name: CODEX049_DT_TRANSFER_v1.0_CONTROLLED
+          path: ${{ runner.temp }}/CODEX049_DT_TRANSFER_v1.0_CONTROLLED/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
+
+      - name: Upload final evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CODEX049_FINAL_EVIDENCE_${{ github.run_id }}
+          path: ${{ runner.temp }}/codex049-final-evidence/
+          if-no-files-found: warn
+          retention-days: 30
