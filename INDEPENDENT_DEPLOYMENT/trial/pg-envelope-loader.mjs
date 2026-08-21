@@ -36,6 +36,6 @@ export class Pool extends realPg.Pool {
     });
   }
 }
-`;
+`,
   };
 }
