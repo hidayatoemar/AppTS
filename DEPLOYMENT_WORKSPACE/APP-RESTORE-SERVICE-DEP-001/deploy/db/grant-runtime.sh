@@ -165,6 +165,12 @@ GRANT SELECT, INSERT ON TABLE
   appts.pending_capture_idempotency_binding
 TO :"runtime_role";
 
+-- MCR-to-CODEX-049 Trial owner-flow writer completion.
+-- Exact bounded authority: INSERT only; no SELECT/UPDATE/DELETE/TRUNCATE.
+GRANT INSERT ON TABLE
+  appts.intake_cue, appts.source_observation
+TO :"runtime_role";
+
 -- Mutable tables (SELECT + INSERT + UPDATE; no DELETE)
 GRANT SELECT, INSERT, UPDATE ON TABLE
   appts.ticket_identity, appts.pre_ticket_case,

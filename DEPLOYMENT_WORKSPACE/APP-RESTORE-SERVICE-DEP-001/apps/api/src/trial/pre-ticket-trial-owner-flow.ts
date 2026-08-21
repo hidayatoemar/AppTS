@@ -76,6 +76,16 @@ const isoNow = (): string => new Date().toISOString();
 const digest = (value: string): string => createHash("sha256").update(value).digest("hex");
 const byteDigest = (value: string): Buffer => createHash("sha256").update(value).digest();
 
+function idempotencyAdvisoryLockKey(idempotencyKey: string): string {
+  return createHash("sha256")
+    .update(OWNER_DOMAIN)
+    .update("\0")
+    .update(idempotencyKey)
+    .digest()
+    .readBigInt64BE(0)
+    .toString();
+}
+
 function requireString(value: unknown, code: string): string {
   if (typeof value !== "string" || value.length === 0) throw new Error(code);
   return value;
@@ -140,10 +150,12 @@ function ownerPredicates(): readonly PredicateResult[] {
   });
 }
 
-async function inTransaction<Result>(pool: PersistencePool, work: (client: PersistenceClient) => Promise<Result>): Promise<Result> {
+type TransactionIsolation = "SERIALIZABLE" | "READ COMMITTED";
+
+async function inTransaction<Result>(pool: PersistencePool, work: (client: PersistenceClient) => Promise<Result>, isolation: TransactionIsolation = "SERIALIZABLE"): Promise<Result> {
   const client = await pool.connect();
   try {
-    await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+    await client.query(`BEGIN ISOLATION LEVEL ${isolation}`);
     const result = await work(client);
     await client.query("COMMIT");
     return result;
@@ -164,8 +176,9 @@ async function audit(client: PersistenceClient, event: string, subjectId: string
 
 async function ptx01(pool: PersistencePool, submission: PreTicketSubmission, ids: MechanicalIds, disclosure: string): Promise<Ptx01Result> {
   return inTransaction(pool, async (client) => {
+    await client.query("SELECT pg_advisory_xact_lock($1::bigint)", [idempotencyAdvisoryLockKey(submission.idempotencyKey)]);
     const prior = await client.query<{ payload_hash: string; durable_result_ref: string }>(
-      "SELECT payload_hash,durable_result_ref::text AS durable_result_ref FROM appts.idempotency_ledger WHERE owner_domain_ref=$1 AND idempotency_key=$2 FOR UPDATE",
+      "SELECT payload_hash,durable_result_ref::text AS durable_result_ref FROM appts.idempotency_ledger WHERE owner_domain_ref=$1 AND idempotency_key=$2",
       [OWNER_DOMAIN, submission.idempotencyKey],
     );
     if (prior.rowCount === 1) {
@@ -203,7 +216,7 @@ async function ptx01(pool: PersistencePool, submission: PreTicketSubmission, ids
     );
     await audit(client, "APPTS.CORE.D01.PRETICKET_ADMISSION.PTX-01", caseId, submission, ids, disclosure);
     return { disposition: "CREATED", caseId, cueId, observationId };
-  });
+  }, "READ COMMITTED");
 }
 
 async function ptx02And03(pool: PersistencePool, submission: PreTicketSubmission, ids: MechanicalIds, disclosure: string, caseId: string, evaluation: PreTicketAdmissionEvaluation): Promise<{ readonly assessmentId: string; readonly decisionId: string }> {
