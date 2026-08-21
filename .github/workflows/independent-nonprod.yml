@@ -37,7 +37,7 @@ jobs:
           test "$confirmation" = 'INDEPENDENT_NONPROD' || { echo 'BLOCKED: invalid confirmation token'; exit 2; }
           test -z "${extra:-}" || { echo 'BLOCKED: malformed request'; exit 2; }
           case "$action" in
-            preflight|deploy|resync|codeverify|start|status|dbobserve|runtimegrant|trialreplay|httptrial|apply049|teardown) ;;
+            preflight|deploy|resync|codeverify|start|status|dbobserve|runtimegrant|trialreplay|httptrial|browserproof|apply049|teardown) ;;
             *) echo 'BLOCKED: unsupported action'; exit 2 ;;
           esac
           echo "REQUESTED_ACTION=$action" >> "$GITHUB_ENV"
@@ -117,6 +117,8 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          INDEP_HOST: ${{ secrets.INDEP_HOST }}
+          INDEP_USER: ${{ secrets.INDEP_USER }}
         run: |
           set -euo pipefail
           mkdir -p ../../INDEPENDENT_DEPLOYMENT/evidence
@@ -131,6 +133,7 @@ jobs:
             runtimegrant) playbook=playbooks/runtime-grant-current.yml ;;
             trialreplay)  playbook=playbooks/trial-replay.yml ;;
             httptrial)    playbook=playbooks/http-trial.yml ;;
+            browserproof) playbook='' ;;
             apply049)     playbook='' ;;
             teardown)     playbook=playbooks/teardown.yml ;;
             *) echo 'BLOCKED: unsupported action'; exit 2 ;;
@@ -142,6 +145,8 @@ jobs:
             echo "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             if [ "$REQUESTED_ACTION" = 'apply049' ]; then
               bash ../scripts/apply-codex049.sh
+            elif [ "$REQUESTED_ACTION" = 'browserproof' ]; then
+              bash ../scripts/browser-proof.sh
             else
               ansible-playbook "$playbook"
             fi
