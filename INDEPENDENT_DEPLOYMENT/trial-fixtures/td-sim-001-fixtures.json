@@ -1,0 +1,339 @@
+{
+  "package_identity": {
+    "package_id": "TD-SIM-001",
+    "title": "RESTORE_SERVICE Trial Data and Simulation Configuration Pack",
+    "version": "v0.1_WD",
+    "classification": "STATIC_REFERENCE_ONLY",
+    "loadability_status": "NOT_VERIFIED",
+    "runtime_projection_status": "OPEN_RUNTIME_SERVER_PROJECTION_DEPENDENCY",
+    "trial_environment_status": "OPEN_TRIAL_ENVIRONMENT_DEPENDENCY",
+    "real_data_status": "NO_REAL_DATA",
+    "secret_provider_status": "NO_SECRETS_NO_PROVIDERS",
+    "production_status": "NOT_FOR_PRODUCTION"
+  },
+  "semantic_controls": {
+    "twt_meaning": "Tugas, Wewenang, Tanggung Jawab",
+    "ticket_lifecycle_allowed_states": [
+      "ACCEPTED",
+      "ACTIVE",
+      "TERMINAL_PROCESSING",
+      "CLOSED"
+    ],
+    "orthogonal_conditions": [
+      "WAITING",
+      "BLOCKER",
+      "DEPENDENCY",
+      "VERIFICATION",
+      "COMMUNICATION",
+      "HANDOVER",
+      "ESCALATION"
+    ],
+    "closed_rule": "CLOSED is irreversible; later facts require correction or successor handling if supported.",
+    "action_rule": "Action submission is intent pending authoritative result and currentness revalidation.",
+    "escalation_rule": "Escalation adds visibility or intervention duty and does not transfer responsibility unless accepted handover occurs."
+  },
+  "dummy_identities": [
+    {
+      "identity_id": "TRN-PERSON-001",
+      "display_name": "Training Intake Operator Alpha",
+      "identity_type": "DUMMY_PERSON",
+      "non_production_marker": true
+    },
+    {
+      "identity_id": "TRN-PERSON-002",
+      "display_name": "Training Field Technician Bravo",
+      "identity_type": "DUMMY_PERSON",
+      "non_production_marker": true
+    },
+    {
+      "identity_id": "TRN-PERSON-003",
+      "display_name": "Training Verification Analyst Charlie",
+      "identity_type": "DUMMY_PERSON",
+      "non_production_marker": true
+    },
+    {
+      "identity_id": "TRN-PERSON-004",
+      "display_name": "Training Operations Supervisor Delta",
+      "identity_type": "DUMMY_PERSON",
+      "non_production_marker": true
+    },
+    {
+      "identity_id": "TRN-PERSON-005",
+      "display_name": "Training Communication Coordinator Echo",
+      "identity_type": "DUMMY_PERSON",
+      "non_production_marker": true
+    }
+  ],
+  "dummy_subjects": [
+    {
+      "subject_id": "TRN-SUBJECT-001",
+      "subject_type": "TRAINING_SERVICE",
+      "display_name": "Training Service Segment Alpha",
+      "location_label": "Training Site North",
+      "customer_label": "Training Customer Alpha",
+      "non_production_marker": true
+    },
+    {
+      "subject_id": "TRN-SUBJECT-002",
+      "subject_type": "TRAINING_SERVICE",
+      "display_name": "Training Service Segment Bravo",
+      "location_label": "Training Site South",
+      "customer_label": "Training Customer Bravo",
+      "non_production_marker": true
+    }
+  ],
+  "roles": [
+    {
+      "role_id": "RS-ROLE-INTAKE-OPERATOR",
+      "role_name": "Intake Operator",
+      "tugas": "Review pre-Ticket source facts and preserve intake currentness.",
+      "wewenang": "Submit admission intent only when current authoritative action context permits it.",
+      "tanggung_jawab": "Ensure no Ticket is formed from incomplete, stale, or contradictory source facts without controlled acceptance."
+    },
+    {
+      "role_id": "RS-ROLE-FIELD-TECHNICIAN",
+      "role_name": "Field Technician",
+      "tugas": "Perform assigned restoration work and provide evidence.",
+      "wewenang": "Submit work completion or field evidence intent within the current assigned scope.",
+      "tanggung_jawab": "Maintain evidence provenance and avoid claiming verification or closure."
+    },
+    {
+      "role_id": "RS-ROLE-VERIFICATION-ANALYST",
+      "role_name": "Verification Analyst",
+      "tugas": "Separate evidence from verified restoration truth.",
+      "wewenang": "Submit verification intent only when eligible and currentness is valid.",
+      "tanggung_jawab": "Preserve distinction between evidence, restoration claim, and verified restoration."
+    },
+    {
+      "role_id": "RS-ROLE-OPERATIONS-SUPERVISOR",
+      "role_name": "Operations Supervisor",
+      "tugas": "Observe blockers, dependencies, escalation visibility, and handover control.",
+      "wewenang": "Intervene or approve handover only through accepted controlled mechanisms.",
+      "tanggung_jawab": "Do not treat escalation as automatic responsibility transfer."
+    },
+    {
+      "role_id": "RS-ROLE-COMMUNICATION-COORDINATOR",
+      "role_name": "Communication Coordinator",
+      "tugas": "Prepare training communication obligations without real channels.",
+      "wewenang": "Record simulated communication obligation status only.",
+      "tanggung_jawab": "Ensure message sent/delivered/acknowledged is not treated as restoration, verification, or closure."
+    }
+  ],
+  "role_holders": [
+    {
+      "role_id": "RS-ROLE-INTAKE-OPERATOR",
+      "holder_identity_id": "TRN-PERSON-001",
+      "eligibility_status": "TRAINING_ELIGIBLE"
+    },
+    {
+      "role_id": "RS-ROLE-FIELD-TECHNICIAN",
+      "holder_identity_id": "TRN-PERSON-002",
+      "eligibility_status": "TRAINING_ELIGIBLE"
+    },
+    {
+      "role_id": "RS-ROLE-VERIFICATION-ANALYST",
+      "holder_identity_id": "TRN-PERSON-003",
+      "eligibility_status": "TRAINING_ELIGIBLE"
+    },
+    {
+      "role_id": "RS-ROLE-OPERATIONS-SUPERVISOR",
+      "holder_identity_id": "TRN-PERSON-004",
+      "eligibility_status": "TRAINING_ELIGIBLE"
+    },
+    {
+      "role_id": "RS-ROLE-COMMUNICATION-COORDINATOR",
+      "holder_identity_id": "TRN-PERSON-005",
+      "eligibility_status": "TRAINING_ELIGIBLE"
+    }
+  ],
+  "pre_ticket_cases": [
+    {
+      "case_id": "TD-PRE-001",
+      "route_hint": "/intake/TD-PRE-001",
+      "source_type": "TRAINING_CUSTOMER_REPORT",
+      "subject_id": "TRN-SUBJECT-001",
+      "source_currentness": "CURRENT",
+      "source_condition": "INCOMPLETE_MANDATORY_FACTS",
+      "admission_training_result": "HOLD_AS_PRE_TICKET_UNTIL_CONTROLLED_ACCEPTANCE",
+      "notes": "Demonstrates that a report is not automatically a Ticket."
+    },
+    {
+      "case_id": "TD-PRE-002",
+      "route_hint": "/intake/TD-PRE-002",
+      "source_type": "TRAINING_NMS_INDICATION",
+      "subject_id": "TRN-SUBJECT-002",
+      "source_currentness": "STALE_OR_CONTRADICTORY",
+      "source_condition": "DUPLICATE_CORRELATION_CANDIDATE",
+      "admission_training_result": "REQUIRES_RECONCILIATION_BEFORE_TICKET_FORMATION",
+      "notes": "Demonstrates that machine indication is not canonical truth by itself."
+    }
+  ],
+  "ticket_seeds": [
+    {
+      "ticket_id": "TD-TCK-ACCEPTED-001",
+      "route_hint": "/tickets/TD-TCK-ACCEPTED-001",
+      "subject_id": "TRN-SUBJECT-001",
+      "lifecycle_state": "ACCEPTED",
+      "current_responsible_role_id": "RS-ROLE-INTAKE-OPERATOR",
+      "aggregate_version": 1,
+      "currentness": "CURRENT",
+      "training_purpose": "Show Ticket formation and immediate responsibility."
+    },
+    {
+      "ticket_id": "TD-TCK-ACTIVE-001",
+      "route_hint": "/tickets/TD-TCK-ACTIVE-001",
+      "subject_id": "TRN-SUBJECT-001",
+      "lifecycle_state": "ACTIVE",
+      "current_responsible_role_id": "RS-ROLE-FIELD-TECHNICIAN",
+      "aggregate_version": 4,
+      "currentness": "CURRENT",
+      "training_purpose": "Show active work, evidence submission, waiting, blockers, escalation, and handover distinction."
+    },
+    {
+      "ticket_id": "TD-TCK-TERMINAL-001",
+      "route_hint": "/tickets/TD-TCK-TERMINAL-001",
+      "subject_id": "TRN-SUBJECT-002",
+      "lifecycle_state": "TERMINAL_PROCESSING",
+      "current_responsible_role_id": "RS-ROLE-VERIFICATION-ANALYST",
+      "aggregate_version": 7,
+      "currentness": "CURRENT",
+      "training_purpose": "Show restoration claim, verification, and terminal readiness without automatic closure."
+    },
+    {
+      "ticket_id": "TD-TCK-CLOSED-001",
+      "route_hint": "/tickets/TD-TCK-CLOSED-001",
+      "subject_id": "TRN-SUBJECT-002",
+      "lifecycle_state": "CLOSED",
+      "current_responsible_role_id": null,
+      "aggregate_version": 9,
+      "currentness": "CURRENT",
+      "training_purpose": "Show CLOSED irreversibility, correction, and successor concept."
+    }
+  ],
+  "scenario_states": [
+    {
+      "scenario_state_id": "TD-STATE-ACTION-001",
+      "ticket_id": "TD-TCK-ACTIVE-001",
+      "view_route": "/tickets/TD-TCK-ACTIVE-001/action/work-completion",
+      "action_class_ref": "WORK_COMPLETION_INTENT",
+      "availability_classification": "OPEN_RUNTIME_SERVER_PROJECTION_DEPENDENCY",
+      "expected_learning": "Submit is only intent pending authoritative result/refetch."
+    },
+    {
+      "scenario_state_id": "TD-STATE-EVIDENCE-001",
+      "ticket_id": "TD-TCK-ACTIVE-001",
+      "view_route": "/tickets/TD-TCK-ACTIVE-001/evidence",
+      "evidence_status": "PRESENT_NOT_VERIFIED",
+      "expected_learning": "Evidence presence is not verified restoration."
+    },
+    {
+      "scenario_state_id": "TD-STATE-CONDITION-001",
+      "ticket_id": "TD-TCK-ACTIVE-001",
+      "view_route": "/tickets/TD-TCK-ACTIVE-001/conditions",
+      "condition_status": "WAITING_WITH_BLOCKER_AND_DEPENDENCY",
+      "expected_learning": "Waiting and blocker visibility do not remove accountability."
+    },
+    {
+      "scenario_state_id": "TD-STATE-COMM-001",
+      "ticket_id": "TD-TCK-ACTIVE-001",
+      "view_route": "/tickets/TD-TCK-ACTIVE-001/communication",
+      "communication_status": "SIMULATED_OBLIGATION_NO_PROVIDER",
+      "expected_learning": "Message state is not restoration, verification, or closure."
+    },
+    {
+      "scenario_state_id": "TD-STATE-CLOSED-001",
+      "ticket_id": "TD-TCK-CLOSED-001",
+      "view_route": "/tickets/TD-TCK-CLOSED-001/closed",
+      "closed_status": "IRREVERSIBLE_WITH_CORRECTION_OR_SUCCESSOR_CONCEPT",
+      "expected_learning": "Correction is not reopen; successor is not history rewrite."
+    }
+  ],
+  "evidence_fixtures": [
+    {
+      "evidence_id": "TD-EVD-001",
+      "ticket_id": "TD-TCK-ACTIVE-001",
+      "evidence_type": "TRAINING_FIELD_NOTE",
+      "provenance": "DUMMY_FIELD_OBSERVATION",
+      "verification_status": "UNVERIFIED",
+      "semantic_guard": "Evidence is not verified restoration."
+    },
+    {
+      "evidence_id": "TD-EVD-002",
+      "ticket_id": "TD-TCK-TERMINAL-001",
+      "evidence_type": "TRAINING_VERIFICATION_NOTE",
+      "provenance": "DUMMY_VERIFICATION_REVIEW",
+      "verification_status": "VERIFIED_FOR_TRAINING_REFERENCE_ONLY",
+      "semantic_guard": "Verified restoration does not automatically close all obligations."
+    }
+  ],
+  "waiting_blocker_dependency_fixtures": [
+    {
+      "condition_id": "TD-COND-001",
+      "ticket_id": "TD-TCK-ACTIVE-001",
+      "condition_type": "WAITING",
+      "owner_or_responsibility_ref": "RS-ROLE-FIELD-TECHNICIAN",
+      "reason_ref": "TRAINING_ACCESS_DEPENDENCY",
+      "timing_basis": "OPEN_CONFIGURATION_DEPENDENCY",
+      "semantic_guard": "No numeric SLA or aging threshold is asserted."
+    },
+    {
+      "condition_id": "TD-COND-002",
+      "ticket_id": "TD-TCK-ACTIVE-001",
+      "condition_type": "BLOCKER",
+      "owner_or_responsibility_ref": "RS-ROLE-OPERATIONS-SUPERVISOR",
+      "reason_ref": "TRAINING_MATERIAL_UNAVAILABLE",
+      "timing_basis": "OPEN_CONFIGURATION_DEPENDENCY",
+      "semantic_guard": "Blocker visibility does not transfer responsibility."
+    }
+  ],
+  "handover_escalation_fixtures": [
+    {
+      "handover_or_escalation_id": "TD-ESC-001",
+      "ticket_id": "TD-TCK-ACTIVE-001",
+      "type": "ESCALATION_VISIBILITY",
+      "current_responsible_role_id": "RS-ROLE-FIELD-TECHNICIAN",
+      "visible_to_role_id": "RS-ROLE-OPERATIONS-SUPERVISOR",
+      "transfer_effect": "NO_RESPONSIBILITY_TRANSFER",
+      "semantic_guard": "Escalation is visibility/intervention duty only."
+    },
+    {
+      "handover_or_escalation_id": "TD-HO-001",
+      "ticket_id": "TD-TCK-ACTIVE-001",
+      "type": "HANDOVER_CANDIDATE",
+      "from_role_id": "RS-ROLE-FIELD-TECHNICIAN",
+      "to_role_id": "RS-ROLE-VERIFICATION-ANALYST",
+      "acceptance_status": "PENDING_AUTHORITATIVE_CONTEXT",
+      "semantic_guard": "Responsibility transfers only through accepted handover."
+    }
+  ],
+  "communication_fixtures": [
+    {
+      "communication_id": "TD-COMM-001",
+      "ticket_id": "TD-TCK-ACTIVE-001",
+      "audience_ref": "TRAINING_AUDIENCE_INTERNAL_ONLY",
+      "channel_ref": "SIMULATED_CHANNEL_NO_PROVIDER",
+      "template_ref": "TRAINING_STATUS_NOTICE",
+      "delivery_status": "NOT_SENT_NO_PROVIDER",
+      "semantic_guard": "No real message, provider, customer, or channel is used."
+    }
+  ],
+  "reporting_fixture_values": {
+    "classification": "STATIC_REFERENCE_ONLY",
+    "source_truth": "Derived only from this fixture file.",
+    "counts": {
+      "pre_ticket_cases": 2,
+      "ticket_seeds": 4,
+      "non_closed_tickets": 3,
+      "closed_tickets": 1,
+      "tickets_with_waiting_or_blocker": 1,
+      "tickets_with_unverified_evidence": 1,
+      "tickets_with_communication_obligation": 1
+    },
+    "open_metrics": [
+      "Numeric SLA target",
+      "Aging threshold",
+      "Escalation threshold",
+      "Executive KPI target"
+    ]
+  }
+}
