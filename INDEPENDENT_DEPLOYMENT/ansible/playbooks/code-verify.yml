@@ -1,0 +1,40 @@
+---
+- name: Independently verify admitted RESTORE_SERVICE Trial source on Actions runner
+  hosts: localhost
+  connection: local
+  become: false
+  gather_facts: false
+  vars:
+    appts_src_dir: "{{ playbook_dir }}/../../../DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001"
+  tasks:
+    - name: Verify controlled source with Node 24.19.0 and npm 11.17.0
+      ansible.builtin.shell: |
+        set -euo pipefail
+        docker run --rm \
+          -v "{{ appts_src_dir }}:/workspace" \
+          -w /workspace \
+          node:24.19.0-bookworm-slim \
+          bash -lc '
+            set -euo pipefail
+            npm install --global npm@11.17.0 --ignore-scripts --no-audit --no-fund >/dev/null
+            node --version
+            npm --version
+            npm ci --ignore-scripts --no-audit --no-fund
+            npm run verify:boundaries
+            npm run typecheck
+            npm run build
+            node --experimental-strip-types --test tests/integration/ui-routes.integration.test.ts
+            node --experimental-strip-types --test tests/dep001/api-bootstrap.test.ts tests/dep001/compose-artifact.test.mjs
+          '
+      args:
+        executable: /bin/bash
+      register: code_verify
+      changed_when: false
+
+    - name: Report controlled code-verification evidence
+      ansible.builtin.debug:
+        msg:
+          - "code_verify_rc={{ code_verify.rc }}"
+          - "controlled_node=24.19.0"
+          - "controlled_npm=11.17.0"
+          - "boundary_typecheck_build_http_tests=PASS"
