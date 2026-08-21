@@ -10,15 +10,20 @@ mkdir -p "$EVIDENCE_DIR"
 
 PORT=18080
 KEY="$HOME/.ssh/independent_deploy_key"
-ssh -i "$KEY" -o BatchMode=yes -o ExitOnForwardFailure=yes -N \
+SSH_BASE=(ssh -i "$KEY" -o BatchMode=yes)
+"${SSH_BASE[@]}" -o ExitOnForwardFailure=yes -N \
   -L "${PORT}:127.0.0.1:8080" "${INDEP_USER}@${INDEP_HOST}" &
 TUNNEL_PID=$!
 trap 'kill "$TUNNEL_PID" 2>/dev/null || true' EXIT
 
-for _ in $(seq 1 30); do
-  if curl -fsS "http://127.0.0.1:${PORT}/readyz" >/dev/null; then break; fi
-  sleep 1
-done
+wait_ready() {
+  for _ in $(seq 1 60); do
+    if curl -fsS "http://127.0.0.1:${PORT}/readyz" >/dev/null 2>&1; then return 0; fi
+    sleep 1
+  done
+  return 1
+}
+wait_ready
 curl -fsS "http://127.0.0.1:${PORT}/readyz" | tee "$EVIDENCE_DIR/readyz-before.json"
 
 CHROME=""
@@ -116,6 +121,41 @@ assert item["decision_code"] == "HOLD_AS_PRE_TICKET", item
 assert item["completeness_result"] == "MISSING", item
 assert item["completeness_reason"] == "INCOMPLETE_MANDATORY_FACTS", item
 PY
+CASE_COUNT_BEFORE_RESTART="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"]["case_count"])' "$EVIDENCE_DIR/intake-after.json")"
+
+"${SSH_BASE[@]}" "${INDEP_USER}@${INDEP_HOST}" \
+  "sudo sh -lc 'cd /opt/appts-independent-restore-service/deploy/compose && docker compose -f compose.yaml --env-file .env restart postgres api'"
+wait_ready
+curl -fsS "http://127.0.0.1:${PORT}/readyz" | tee "$EVIDENCE_DIR/readyz-after-restart.json"
+
+chrome_dump /work "$EVIDENCE_DIR/work-after-restart.html"
+chrome_dump /intake "$EVIDENCE_DIR/intake-after-restart.html"
+chrome_shot /work "$EVIDENCE_DIR/work-after-restart.png"
+chrome_shot /intake "$EVIDENCE_DIR/intake-after-restart.png"
+curl -fsS "http://127.0.0.1:${PORT}/api/v1/ui/work-queue" > "$EVIDENCE_DIR/work-after-restart.json"
+curl -fsS "http://127.0.0.1:${PORT}/api/v1/ui/intake" > "$EVIDENCE_DIR/intake-after-restart.json"
+
+grep -Fq 'No runtime Tickets are currently projected.' "$EVIDENCE_DIR/work-after-restart.html"
+grep -Fq "$CASE_ID" "$EVIDENCE_DIR/intake-after-restart.html"
+grep -Fq 'HOLD_AS_PRE_TICKET' "$EVIDENCE_DIR/intake-after-restart.html"
+grep -Fq 'NOT_ACCEPTABLE' "$EVIDENCE_DIR/intake-after-restart.html"
+grep -Fq 'MISSING / INCOMPLETE_MANDATORY_FACTS' "$EVIDENCE_DIR/intake-after-restart.html"
+python3 - "$CASE_ID" "$CASE_COUNT_BEFORE_RESTART" "$EVIDENCE_DIR/work-after-restart.json" "$EVIDENCE_DIR/intake-after-restart.json" <<'PY'
+import json, sys
+case_id, expected_count, work_path, intake_path = sys.argv[1:]
+work = json.load(open(work_path))
+intake = json.load(open(intake_path))
+assert work["view_id"] == "UX-RS-01" and work["data"]["ticket_count"] == 0, work
+assert intake["view_id"] == "UX-RS-02", intake
+assert intake["data"]["case_count"] == int(expected_count), (expected_count, intake["data"]["case_count"])
+cases = {item["case_id"]: item for item in intake["data"]["cases"]}
+assert case_id in cases, (case_id, cases.keys())
+item = cases[case_id]
+assert item["case_status_ref"] == "HOLD_AS_PRE_TICKET", item
+assert item["assessment_result"] == "NOT_ACCEPTABLE", item
+assert item["decision_code"] == "HOLD_AS_PRE_TICKET", item
+assert item["completeness_result"] == "MISSING", item
+PY
 
 cat > "$EVIDENCE_DIR/SUMMARY.txt" <<EOF
 browser_binary=$CHROME
@@ -130,5 +170,12 @@ intake_after_hold_as_pre_ticket=PASS
 intake_after_not_acceptable=PASS
 intake_after_missing_facts=PASS
 browser_next_consumer_learning_flow=PASS
+compose_postgres_api_restart_without_volume_reset=PASS
+recovery_readyz=PASS
+recovery_case_count_preserved=$CASE_COUNT_BEFORE_RESTART
+recovery_case_id_preserved=$CASE_ID
+recovery_work_queue_zero_ticket=PASS
+recovery_browser_projection=PASS
+restart_recovery_durability=PASS
 EOF
 cat "$EVIDENCE_DIR/SUMMARY.txt"
