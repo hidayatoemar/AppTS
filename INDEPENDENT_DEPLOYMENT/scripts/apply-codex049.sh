@@ -18,8 +18,6 @@ P3='DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/tests/dep001/idempotency-mi
 rm -rf "$TMP"
 mkdir -p "$TMP/extract"
 
-# actions/checkout uses depth=1 in the established DT workflow; deepen only the
-# isolated experiment branch enough to make the admitted base available locally.
 git fetch --no-tags --deepen=100 origin experiment/independent-restore-deploy
 git cat-file -e "$BASE^{commit}"
 git merge-base --is-ancestor "$BASE" HEAD
@@ -37,12 +35,16 @@ unzip -q "$ZIP" -d "$TMP/extract"
 (cd "$TMP/extract" && sha256sum -c SHA256SUMS)
 
 rsync -a "$TMP/extract/overlay/" ./
+printf 'post_copy_sha256:\n'
+sha256sum "$P1" "$P2" "$P3"
 expected="$(printf '%s\n' "$P1" "$P2" "$P3" | sort)"
 actual="$(git diff --name-only | sort)"
+printf 'expected_paths:\n%s\nactual_paths:\n%s\n' "$expected" "$actual"
 test "$actual" = "$expected"
 
 git add -- "$P1" "$P2" "$P3"
 staged="$(git diff --cached --name-only | sort)"
+printf 'staged_paths:\n%s\n' "$staged"
 test "$staged" = "$expected"
 
 git config user.name 'github-actions[bot]'
