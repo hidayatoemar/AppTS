@@ -1,0 +1,148 @@
+---
+- name: Resync admitted RESTORE_SERVICE source without database reset
+  hosts: independent
+  become: true
+  gather_facts: false
+  vars:
+    appts_src_dir: "{{ playbook_dir }}/../../../DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/"
+    appts_install_dir: /opt/appts-independent-restore-service
+    appts_compose_dir: "{{ appts_install_dir }}/deploy/compose"
+    appts_transfer_archive: /tmp/appts-independent-dep001-resync.tar.gz
+    appts_db_secret_file: /etc/appts-independent/db-secrets.json
+    appts_runtime_password: "{{ lookup('ansible.builtin.env', 'INDEP_POSTGRES_PASSWORD') }}"
+  tasks:
+    - name: Require existing isolated DT install directory
+      ansible.builtin.stat:
+        path: "{{ appts_install_dir }}"
+      register: install_dir
+
+    - name: Require existing persisted DB secret binding
+      ansible.builtin.stat:
+        path: "{{ appts_db_secret_file }}"
+      register: db_secret_file_state
+
+    - name: Refuse resync if preserved DT deployment is absent
+      ansible.builtin.assert:
+        that:
+          - install_dir.stat.exists
+          - db_secret_file_state.stat.exists
+          - appts_runtime_password | length > 0
+        fail_msg: "BLOCKED: preserved DT deployment/credential binding is absent"
+      no_log: true
+
+    - name: Read persisted experimental DB secrets
+      ansible.builtin.slurp:
+        src: "{{ appts_db_secret_file }}"
+      register: db_secret_file_raw
+      no_log: true
+
+    - name: Bind existing admin credential for environment rendering only
+      ansible.builtin.set_fact:
+        appts_admin_password: "{{ (db_secret_file_raw.content | b64decode | from_json).admin_password }}"
+      no_log: true
+
+    - name: Capture preserved PostgreSQL container identity before source resync
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - ps
+          - -q
+          - postgres
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      register: postgres_before
+      changed_when: false
+
+    - name: Require preserved PostgreSQL container before source resync
+      ansible.builtin.assert:
+        that:
+          - postgres_before.stdout | length > 0
+        fail_msg: "BLOCKED: preserved PostgreSQL container is absent; refusing source-only resync"
+
+    - name: Package admitted DEP workspace once on Actions runner
+      ansible.builtin.command:
+        argv:
+          - tar
+          - -C
+          - "{{ appts_src_dir }}"
+          - -czf
+          - "{{ appts_transfer_archive }}"
+          - .
+      delegate_to: localhost
+      become: false
+      changed_when: true
+
+    - name: Overlay admitted DEP workspace onto isolated install directory
+      ansible.builtin.unarchive:
+        src: "{{ appts_transfer_archive }}"
+        dest: "{{ appts_install_dir }}/"
+        owner: root
+        group: root
+
+    - name: Remove temporary runner transfer archive
+      ansible.builtin.file:
+        path: "{{ appts_transfer_archive }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+      changed_when: true
+
+    - name: Render accepted isolated Trial Compose environment
+      ansible.builtin.template:
+        src: ../templates/compose.env.j2
+        dest: "{{ appts_compose_dir }}/.env"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Validate updated Compose configuration without starting services
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - config
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      changed_when: false
+
+    - name: Confirm preserved PostgreSQL container identity is unchanged
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - ps
+          - -q
+          - postgres
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      register: postgres_after
+      changed_when: false
+
+    - name: Require source-only resync preserved PostgreSQL container
+      ansible.builtin.assert:
+        that:
+          - postgres_after.stdout == postgres_before.stdout
+        fail_msg: "BLOCKED: source resync changed preserved PostgreSQL container identity"
+
+    - name: Report bounded source-resync evidence
+      ansible.builtin.debug:
+        msg:
+          - "source_resync=PASS"
+          - "postgres_container_preserved=true"
+          - "database_reset=false"
+          - "migration_execution=false"
+          - "accepted_trial_disclosure_binding=rendered"
