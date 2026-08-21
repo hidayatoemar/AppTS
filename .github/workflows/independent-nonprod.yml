@@ -36,7 +36,7 @@ jobs:
           test "$confirmation" = 'INDEPENDENT_NONPROD' || { echo 'BLOCKED: invalid confirmation token'; exit 2; }
           test -z "${extra:-}" || { echo 'BLOCKED: malformed request'; exit 2; }
           case "$action" in
-            preflight|deploy|start|status|dbobserve|runtimegrant|teardown) ;;
+            preflight|deploy|start|status|dbobserve|runtimegrant|trialreplay|teardown) ;;
             *) echo 'BLOCKED: unsupported action'; exit 2 ;;
           esac
           echo "REQUESTED_ACTION=$action" >> "$GITHUB_ENV"
@@ -68,6 +68,7 @@ jobs:
           ansible-playbook playbooks/status.yml --syntax-check
           ansible-playbook playbooks/db-observe.yml --syntax-check
           ansible-playbook playbooks/runtime-grant.yml --syntax-check
+          ansible-playbook playbooks/trial-replay.yml --syntax-check
           ansible-playbook playbooks/teardown.yml --syntax-check
           echo 'SYNTAX_CHECK=PASS' >> "$GITHUB_ENV"
 
@@ -119,6 +120,7 @@ jobs:
             status)       playbook=playbooks/status.yml ;;
             dbobserve)    playbook=playbooks/db-observe.yml ;;
             runtimegrant) playbook=playbooks/runtime-grant.yml ;;
+            trialreplay)  playbook=playbooks/trial-replay.yml ;;
             teardown)     playbook=playbooks/teardown.yml ;;
             *) echo 'BLOCKED: unsupported action'; exit 2 ;;
           esac
