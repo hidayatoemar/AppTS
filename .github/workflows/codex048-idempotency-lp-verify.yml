@@ -1,0 +1,119 @@
+name: CODEX048 least-privilege runtime probe
+
+on:
+  push:
+    branches: [mcr/codex048-idempotency-lp-verify]
+  pull_request:
+    branches: [experiment/independent-restore-deploy]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17.11-bookworm
+        env:
+          POSTGRES_PASSWORD: codex048-superuser-local-only
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mcr/codex048-idempotency-lp-verify
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+      - name: Exact base and toolchain
+        working-directory: .
+        run: |
+          set -euo pipefail
+          base=7a813276bf5e4d5e73a48cc6276141f3b9b4d0c5
+          root='DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001'
+          test "$(git rev-parse HEAD^)" = "$base"
+          test -z "$(git diff --name-only "$base" -- "$root")"
+          printf '%s\n' "$base" >/tmp/codex048-base
+          sha256sum "$root/deploy/db/grant-runtime.sh" | awk '{print $1}' >/tmp/grant-runtime-before.sha256
+          npm install --global npm@11.17.0
+          test "$(node --version)" = "v24.19.0"
+          test "$(npm --version)" = "11.17.0"
+          cd "$root"
+          npm ci --ignore-scripts --no-audit --no-fund
+      - name: Apply bounded idempotency correction and build
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('apps/api/src/trial/pre-ticket-trial-owner-flow.ts')
+          t=p.read_text()
+          def once(a,b):
+              global t
+              if t.count(a)!=1: raise SystemExit(f'match count {t.count(a)} for {a[:80]!r}')
+              t=t.replace(a,b,1)
+          marker='const byteDigest = (value: string): Buffer => createHash("sha256").update(value).digest();\n'
+          once(marker, marker+'\nfunction idempotencyAdvisoryLockKey(idempotencyKey: string): string {\n  return createHash("sha256").update(OWNER_DOMAIN).update("\\0").update(idempotencyKey).digest().readBigInt64BE(0).toString();\n}\n')
+          once('async function inTransaction<Result>(pool: PersistencePool, work: (client: PersistenceClient) => Promise<Result>): Promise<Result> {\n','type TransactionIsolation = "SERIALIZABLE" | "READ COMMITTED";\n\nasync function inTransaction<Result>(pool: PersistencePool, work: (client: PersistenceClient) => Promise<Result>, isolation: TransactionIsolation = "SERIALIZABLE"): Promise<Result> {\n')
+          once('    await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");\n','    await client.query(`BEGIN ISOLATION LEVEL ${isolation}`);\n')
+          once('  return inTransaction(pool, async (client) => {\n    const prior = await client.query<{ payload_hash: string; durable_result_ref: string }>(\n      "SELECT payload_hash,durable_result_ref::text AS durable_result_ref FROM appts.idempotency_ledger WHERE owner_domain_ref=$1 AND idempotency_key=$2 FOR UPDATE",\n','  return inTransaction(pool, async (client) => {\n    await client.query("SELECT pg_advisory_xact_lock($1::bigint)", [idempotencyAdvisoryLockKey(submission.idempotencyKey)]);\n    const prior = await client.query<{ payload_hash: string; durable_result_ref: string }>(\n      "SELECT payload_hash,durable_result_ref::text AS durable_result_ref FROM appts.idempotency_ledger WHERE owner_domain_ref=$1 AND idempotency_key=$2",\n')
+          once('    return { disposition: "CREATED", caseId, cueId, observationId };\n  });\n}\n\nasync function ptx02And03','    return { disposition: "CREATED", caseId, cueId, observationId };\n  }, "READ COMMITTED");\n}\n\nasync function ptx02And03')
+          p.write_text(t)
+          PY
+          git diff --check
+          test "$(sha256sum deploy/db/grant-runtime.sh | awk '{print $1}')" = "$(cat /tmp/grant-runtime-before.sha256)"
+          npm run verify:boundaries
+          npm run typecheck
+          npm run build
+      - name: Create disposable roles database and schema
+        run: |
+          set -euo pipefail
+          pgcid="$(docker ps --filter ancestor=postgres:17.11-bookworm -q | head -n1)"; test -n "$pgcid"
+          docker exec -e PGPASSWORD=codex048-superuser-local-only -i "$pgcid" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres <<'SQL'
+          CREATE ROLE appts_migration LOGIN PASSWORD 'codex048-migration-local-only' NOSUPERUSER INHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          CREATE ROLE appts_runtime LOGIN PASSWORD 'codex048-runtime-local-only' NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          CREATE DATABASE appts_dep001_codex048 OWNER appts_migration;
+          SQL
+          for f in db/migrations/V001__cf01_core_schema.sql db/migrations/V002__cf01_runtime_and_exchange_schema.sql db/migrations/V003__dg04_diagnostic_persistence.sql db/migrations/V004__d05_pending_capture_v2.sql; do
+            docker exec -e PGPASSWORD=codex048-migration-local-only -i "$pgcid" psql -X -v ON_ERROR_STOP=1 -U appts_migration -d appts_dep001_codex048 < "$f"
+          done
+      - name: Apply accepted grant unchanged and print owner-flow privilege matrix
+        run: |
+          set -euo pipefail
+          pgcid="$(docker ps --filter ancestor=postgres:17.11-bookworm -q | head -n1)"; test -n "$pgcid"
+          docker cp deploy/db "$pgcid:/tmp/codex048-db"
+          docker exec "$pgcid" chmod +x /tmp/codex048-db/grant-runtime.sh
+          docker exec -e PGHOST=127.0.0.1 -e PGPORT=5432 -e PGDATABASE=appts_dep001_codex048 -e PGUSER=appts_migration -e PGPASSWORD=codex048-migration-local-only -e APPTS_DB_NAME=appts_dep001_codex048 -e APPTS_MIGRATION_ROLE=appts_migration -e APPTS_RUNTIME_ROLE=appts_runtime -e 'APPTS_STAGING_LABEL=STAGING SIMULATION / NON-PRODUCTION' -e APPTS_DISPOSABLE_DATABASE=true -e APPTS_DB_NETWORK_MODE=LOOPBACK "$pgcid" /tmp/codex048-db/grant-runtime.sh
+          test "$(sha256sum deploy/db/grant-runtime.sh | awk '{print $1}')" = "$(cat /tmp/grant-runtime-before.sha256)"
+          docker exec -e PGPASSWORD=codex048-migration-local-only "$pgcid" psql -X -P pager=off -U appts_migration -d appts_dep001_codex048 -c "SELECT table_name,string_agg(privilege_type,',' ORDER BY privilege_type) AS privileges FROM information_schema.role_table_grants WHERE grantee='appts_runtime' AND table_schema='appts' AND table_name IN ('source_ref','intake_cue','source_observation','pre_ticket_case','commit_marker','idempotency_ledger','inbox_entry','audit_event','admission_assessment','admission_predicate_result','intake_decision') GROUP BY table_name ORDER BY table_name;"
+          ledger="$(docker exec -e PGPASSWORD=codex048-migration-local-only "$pgcid" psql -X -At -U appts_migration -d appts_dep001_codex048 -c "SELECT has_table_privilege('appts_runtime','appts.idempotency_ledger','SELECT')||'|'||has_table_privilege('appts_runtime','appts.idempotency_ledger','INSERT')||'|'||has_table_privilege('appts_runtime','appts.idempotency_ledger','UPDATE');")"
+          echo "ledger=$ledger"
+          test "$ledger" = 'true|true|false' -o "$ledger" = 't|t|f'
+      - name: Actual appts_runtime first governed HTTP POST
+        env:
+          DATABASE_URL: postgresql://appts_runtime:codex048-runtime-local-only@127.0.0.1:5432/appts_dep001_codex048
+          API_LISTEN_PORT: '8080'
+          APPTS_TRIAL_DISCLOSURE_LABEL_REF: 6f79da70-412f-469e-bcf7-f544f81b8aa7
+        run: |
+          set -euo pipefail
+          node apps/api/dist/dep-bootstrap.js >/tmp/codex048-api.log 2>&1 & api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true; wait "$api_pid" 2>/dev/null || true; echo ===API_LOG===; cat /tmp/codex048-api.log || true' EXIT
+          for i in $(seq 1 30); do curl --fail --silent http://127.0.0.1:8080/healthz >/dev/null && break || sleep 1; done
+          curl --fail --silent http://127.0.0.1:8080/healthz
+          curl --fail --silent http://127.0.0.1:8080/readyz
+          cat >/tmp/intent.json <<'JSON'
+          {"intent_contract_ref":"APPTS.CORE.D01.PRETICKET_ADMISSION.SUBMISSION / 1.0.0","payload":{"messageId":"10000000-0000-4000-8000-000000000001","idempotencyKey":"20000000-0000-4000-8000-000000000001","correlationId":"30000000-0000-4000-8000-000000000001","trialContext":"TD-PRE-001"}}
+          JSON
+          status="$(curl --silent --show-error -o /tmp/post.json -w '%{http_code}' -H 'content-type: application/json' --data-binary @/tmp/intent.json http://127.0.0.1:8080/api/v1/ui/intents)"
+          echo "HTTP_STATUS=$status"
+          cat /tmp/post.json
+          test "$status" = 200
+          node -e 'const x=require("/tmp/post.json"); if(x.disposition!=="CREATED"||x.assessmentResult!=="NOT_ACCEPTABLE"||x.decision!=="HOLD_AS_PRE_TICKET") process.exit(1)'
