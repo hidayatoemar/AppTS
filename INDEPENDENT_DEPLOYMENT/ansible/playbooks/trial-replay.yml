@@ -1,0 +1,340 @@
+---
+- name: Execute governed TD-PRE-001 replay on isolated DT Trial database
+  hosts: independent
+  become: true
+  gather_facts: false
+  vars:
+    appts_install_dir: /opt/appts-independent-restore-service
+    appts_compose_dir: "{{ appts_install_dir }}/deploy/compose"
+    appts_db_secret_file: /etc/appts-independent/db-secrets.json
+    appts_db_name: appts_dep001_independent
+    appts_admin_user: appts_admin
+    trial_runner_image: appts-independent-td-pre-001-runner:experimental
+    trial_dockerfile: /tmp/appts-dt-td-pre-001.Dockerfile
+    trial_env_file: /tmp/appts-dt-td-pre-001.env
+    trial_loader_file: /tmp/appts-dt-pg-envelope-loader.mjs
+    trial_fixture_root: /tmp/appts-dt-td-sim-001
+    trial_fixture_data_dir: "{{ trial_fixture_root }}/data"
+    trial_fixture_file: "{{ trial_fixture_data_dir }}/td-sim-001-fixtures.json"
+    trial_fixture_src: "{{ playbook_dir }}/../../trial-fixtures/td-sim-001-fixtures.json"
+    trial_loader_src: "{{ playbook_dir }}/../../trial/pg-envelope-loader.mjs"
+    trial_fixture_sha256: 48bd9c7c87c68f485df7bbfcb014ac5bedf61def11ed9e9d8fe0d9cc5f0bbee5
+    trial_disclosure_label_ref: 6f79da70-412f-469e-bcf7-f544f81b8aa7
+    trial_idempotency_key: 9fbb1d1f-6d19-4ee1-9361-50c31560d107
+    source_hash_expectations:
+      - path: packages/core-d01/src/index.ts
+        sha256: 645b6ac323e98c27277eefb03659d76e04d5390e46a34dac27137ec9d3c6a725
+      - path: packages/core-d01/src/pre-ticket-admission.ts
+        sha256: 5684c3246bd7754ce59663f7c55cf349447525c4ce3a1dbe18b2ff9298447ce3
+      - path: apps/api/src/routes/ui-intents.ts
+        sha256: dec733c25b3459546785f0fb6cd3b441a3a544fc004a3f52cb1a0e0ccdc27cb5
+      - path: apps/api/src/routes/trial-disclosure-binding.ts
+        sha256: 42c5387ba22312987b21b3fe4b0305a66fd7926750c686afac8bf30f93aaa98d
+      - path: tools/td-pre-001-governed-replay.mjs
+        sha256: 0fb10a88584737541d0cbe88bc026a1c765fa5aab4e3a64964068ef8a35f0e1d
+      - path: package-lock.json
+        sha256: f508b48b35b3b6b674c9196e80e26fc03c09e10654c502f8c36f840350f2f8bd
+
+  tasks:
+    - name: Require existing isolated deployment material
+      ansible.builtin.stat:
+        path: "{{ appts_compose_dir }}/.env"
+      register: compose_env
+
+    - name: Refuse replay when isolated deployment material is absent
+      ansible.builtin.assert:
+        that:
+          - compose_env.stat.exists
+        fail_msg: "BLOCKED: isolated DT deployment material is absent"
+
+    - name: Require existing DT admin/migration secret material
+      ansible.builtin.stat:
+        path: "{{ appts_db_secret_file }}"
+      register: db_secret_state
+
+    - name: Refuse replay when existing DT admin credential binding is absent
+      ansible.builtin.assert:
+        that:
+          - db_secret_state.stat.exists
+        fail_msg: "BLOCKED: existing DT admin credential binding is absent"
+
+    - name: Verify accepted transfer-overlay hashes in installed source
+      ansible.builtin.stat:
+        path: "{{ appts_install_dir }}/{{ item.path }}"
+        checksum_algorithm: sha256
+      loop: "{{ source_hash_expectations }}"
+      register: source_hash_results
+
+    - name: Require exact accepted transfer-overlay hashes
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.checksum == item.item.sha256
+        fail_msg: "BLOCKED: accepted transfer-overlay hash mismatch at {{ item.item.path }}"
+      loop: "{{ source_hash_results.results }}"
+
+    - name: Read persisted existing DT DB credentials
+      ansible.builtin.slurp:
+        src: "{{ appts_db_secret_file }}"
+      register: db_secret_file_raw
+      no_log: true
+
+    - name: Bind existing DT admin credential only for governed replay envelope
+      ansible.builtin.set_fact:
+        appts_admin_password: "{{ (db_secret_file_raw.content | b64decode | from_json).admin_password }}"
+      no_log: true
+
+    - name: Ensure PostgreSQL service is running without reset
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - up
+          - -d
+          - postgres
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      changed_when: true
+
+    - name: Locate current isolated DB network
+      ansible.builtin.command:
+        argv:
+          - docker
+          - network
+          - ls
+          - --filter
+          - label=com.docker.compose.project=appts-restore-service-dep001
+          - --filter
+          - label=com.docker.compose.network=dep-db-internal
+          - -q
+      register: db_network
+      changed_when: false
+
+    - name: Require one deterministic isolated DB network
+      ansible.builtin.assert:
+        that:
+          - (db_network.stdout_lines | length) == 1
+        fail_msg: "BLOCKED: deterministic isolated DB network not found"
+
+    - name: Capture pre-replay Ticket and runtime counts read-only
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - exec
+          - -T
+          - postgres
+          - psql
+          - -X
+          - -U
+          - "{{ appts_admin_user }}"
+          - -d
+          - "{{ appts_db_name }}"
+          - -Atqc
+          - >-
+            SELECT 'ticket_identity=' || count(*) FROM appts.ticket_identity;
+            SELECT 'ticket_formation=' || count(*) FROM appts.ticket_formation_record;
+            SELECT 'runtime_ticket=' || count(*) FROM appts.runtime_ticket;
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      register: pre_counts
+      changed_when: false
+
+    - name: Create temporary canonical fixture directory
+      ansible.builtin.file:
+        path: "{{ trial_fixture_data_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Transfer canonical TD-SIM-001 fixture evidence copy
+      ansible.builtin.copy:
+        src: "{{ trial_fixture_src }}"
+        dest: "{{ trial_fixture_file }}"
+        owner: root
+        group: root
+        mode: "0400"
+
+    - name: Verify canonical TD-SIM-001 fixture SHA-256 on target
+      ansible.builtin.stat:
+        path: "{{ trial_fixture_file }}"
+        checksum_algorithm: sha256
+      register: trial_fixture_stat
+
+    - name: Require canonical TD-SIM-001 fixture identity
+      ansible.builtin.assert:
+        that:
+          - trial_fixture_stat.stat.checksum == trial_fixture_sha256
+        fail_msg: "BLOCKED: TD-SIM-001 fixture identity mismatch"
+
+    - name: Transfer bounded DT connection-envelope loader
+      ansible.builtin.copy:
+        src: "{{ trial_loader_src }}"
+        dest: "{{ trial_loader_file }}"
+        owner: root
+        group: root
+        mode: "0400"
+
+    - name: Create ephemeral deterministic Trial runner Dockerfile
+      ansible.builtin.copy:
+        dest: "{{ trial_dockerfile }}"
+        owner: root
+        group: root
+        mode: "0400"
+        content: |
+          FROM node:24.19.0-bookworm-slim
+          WORKDIR /workspace
+          COPY . .
+          RUN npm ci --ignore-scripts --no-audit --no-fund
+          ENTRYPOINT ["node","--experimental-strip-types","--experimental-loader","/harness/pg-envelope-loader.mjs","tools/td-pre-001-governed-replay.mjs"]
+
+    - name: Build governed Trial runner from current installed accepted dependency state
+      ansible.builtin.command:
+        argv:
+          - docker
+          - buildx
+          - build
+          - --load
+          - --platform
+          - linux/amd64
+          - -f
+          - "{{ trial_dockerfile }}"
+          - -t
+          - "{{ trial_runner_image }}"
+          - "{{ appts_install_dir }}"
+      changed_when: true
+
+    - name: Execute governed replay and readback with temporary credential envelope
+      block:
+        - name: Render root-only Trial runner environment from existing DT credential
+          ansible.builtin.copy:
+            dest: "{{ trial_env_file }}"
+            owner: root
+            group: root
+            mode: "0600"
+            content: |
+              APPTS_TRIAL_DISCLOSURE_LABEL_REF={{ trial_disclosure_label_ref }}
+              TD_PRE_001_IDEMPOTENCY_KEY={{ trial_idempotency_key }}
+              DT_TRIAL_PGHOST=postgres
+              DT_TRIAL_PGPORT=5432
+              DT_TRIAL_PGUSER={{ appts_admin_user }}
+              DT_TRIAL_PGDATABASE={{ appts_db_name }}
+              DT_TRIAL_PGPASSWORD={{ appts_admin_password }}
+          no_log: true
+
+        - name: Run exact accepted TD-PRE-001 governed replay bytes
+          ansible.builtin.command:
+            argv:
+              - docker
+              - run
+              - --rm
+              - --network
+              - "{{ db_network.stdout }}"
+              - --env-file
+              - "{{ trial_env_file }}"
+              - -v
+              - "{{ trial_loader_file }}:/harness/pg-envelope-loader.mjs:ro"
+              - -v
+              - "{{ trial_fixture_root }}:/TD-SIM-001_RESTORE_SERVICE_Trial_Data_and_Simulation_Configuration_Pack_v0.1_WD:ro"
+              - "{{ trial_runner_image }}"
+          register: replay_result
+          changed_when: true
+          failed_when: false
+
+        - name: Require exact replay process success
+          ansible.builtin.assert:
+            that:
+              - replay_result.rc == 0
+            fail_msg: "Governed TD-PRE-001 replay process failed before accepted readback"
+
+        - name: Parse governed replay result
+          ansible.builtin.set_fact:
+            replay_json: "{{ replay_result.stdout | from_json }}"
+
+        - name: Require accepted first, replay, conflict and disclosure results
+          ansible.builtin.assert:
+            that:
+              - replay_json.first.disposition == 'CREATED'
+              - replay_json.first.assessmentResult == 'NOT_ACCEPTABLE'
+              - replay_json.first.decision == 'HOLD_AS_PRE_TICKET'
+              - replay_json.first.disclosure == trial_disclosure_label_ref
+              - replay_json.replay.disposition == 'IDEMPOTENT_REPLAY'
+              - replay_json.replay.caseId == replay_json.first.caseId
+              - replay_json.conflict.disposition == 'CONFLICT_HOLD'
+            fail_msg: "Governed TD-PRE-001 replay result diverged from accepted behavior"
+
+        - name: Capture governed replay DB readback and post counts
+          ansible.builtin.command:
+            argv:
+              - docker
+              - compose
+              - -f
+              - compose.yaml
+              - --env-file
+              - .env
+              - exec
+              - -T
+              - postgres
+              - psql
+              - -X
+              - -U
+              - "{{ appts_admin_user }}"
+              - -d
+              - "{{ appts_db_name }}"
+              - -Atqc
+              - >-
+                SELECT 'case_status=' || case_status_ref FROM appts.pre_ticket_case WHERE case_id='{{ replay_json.first.caseId }}'::uuid;
+                SELECT 'assessment=' || overall_result_ref FROM appts.admission_assessment WHERE case_id='{{ replay_json.first.caseId }}'::uuid ORDER BY evaluated_at DESC LIMIT 1;
+                SELECT 'completeness=' || result_code || '|' || coalesce(reason_ref_code,'') FROM appts.admission_predicate_result WHERE assessment_id='{{ replay_json.first.assessmentId }}'::uuid AND predicate_identity='COMPLETENESS';
+                SELECT 'ticket_identity=' || count(*) FROM appts.ticket_identity;
+                SELECT 'ticket_formation=' || count(*) FROM appts.ticket_formation_record;
+                SELECT 'runtime_ticket=' || count(*) FROM appts.runtime_ticket;
+                SELECT 'trial_source=' || count(*) FROM appts.source_ref WHERE source_identity='MCR-TRIAL-SOURCE-TD-PRE-001-01' AND source_owner_ref='MCR-TRIAL-SOURCE-TD-PRE-001-01';
+          args:
+            chdir: "{{ appts_compose_dir }}"
+          register: replay_readback
+          changed_when: false
+
+        - name: Require accepted governed readback and zero downstream manufacture
+          ansible.builtin.assert:
+            that:
+              - "'case_status=HOLD_AS_PRE_TICKET' in replay_readback.stdout_lines"
+              - "'assessment=NOT_ACCEPTABLE' in replay_readback.stdout_lines"
+              - "'completeness=MISSING|INCOMPLETE_MANDATORY_FACTS' in replay_readback.stdout_lines"
+              - "('ticket_identity=' ~ (pre_counts.stdout_lines[0].split('=')[1])) in replay_readback.stdout_lines"
+              - "('ticket_formation=' ~ (pre_counts.stdout_lines[1].split('=')[1])) in replay_readback.stdout_lines"
+              - "('runtime_ticket=' ~ (pre_counts.stdout_lines[2].split('=')[1])) in replay_readback.stdout_lines"
+              - "'trial_source=1' in replay_readback.stdout_lines"
+            fail_msg: "Governed TD-PRE-001 DB readback diverged or downstream Ticket/runtime state changed"
+
+        - name: Report safe governed Trial evidence
+          ansible.builtin.debug:
+            msg:
+              - "replay={{ replay_json }}"
+              - "pre_counts={{ pre_counts.stdout_lines }}"
+              - "readback={{ replay_readback.stdout_lines }}"
+              - "fixture_sha256={{ trial_fixture_stat.stat.checksum }}"
+              - "No direct canonical SQL seeding, DB role creation, schema mutation, or credential broadening was used."
+      always:
+        - name: Remove temporary Trial credential envelope
+          ansible.builtin.file:
+            path: "{{ trial_env_file }}"
+            state: absent
+
+    - name: Remove temporary Trial fixture and loader material
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ trial_fixture_root }}"
+        - "{{ trial_loader_file }}"
+        - "{{ trial_dockerfile }}"
