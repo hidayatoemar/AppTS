@@ -37,6 +37,49 @@
           - intake_before.json.data.cases[0].completeness_result == 'MISSING'
         fail_msg: "BLOCKED: preserved TD-PRE-001 projection is not the accepted pre-ticket hold state"
 
+    - name: Probe actual API database identity and privilege view through its own connection string
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - exec
+          - -T
+          - api
+          - node
+          - --input-type=module
+          - -e
+          - >-
+            import {createPersistencePool} from '@appts-restore-service/persistence';
+            const u=new URL(process.env.DATABASE_URL);
+            const p=createPersistencePool({connectionString:process.env.DATABASE_URL});
+            try {
+              const r=await p.query("SELECT current_user AS db_user,current_database() AS db_name,has_table_privilege(current_user,'appts.idempotency_ledger','SELECT') AS idem_select,has_table_privilege(current_user,'appts.idempotency_ledger','INSERT') AS idem_insert,has_table_privilege(current_user,'appts.pre_ticket_case','UPDATE') AS preticket_update");
+              console.log(JSON.stringify({env_user:u.username,env_db:u.pathname.replace(/^\//,''),db:r.rows[0]}));
+            } finally { await p.end(); }
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      register: api_db_identity
+      changed_when: false
+
+    - name: Require API to use accepted runtime role and current owner-flow privileges
+      ansible.builtin.assert:
+        that:
+          - "'\"env_user\":\"appts_runtime\"' in api_db_identity.stdout"
+          - "'\"env_db\":\"appts_dep001_independent\"' in api_db_identity.stdout"
+          - "'\"db_user\":\"appts_runtime\"' in api_db_identity.stdout"
+          - "'\"idem_select\":true' in api_db_identity.stdout"
+          - "'\"idem_insert\":true' in api_db_identity.stdout"
+          - "'\"preticket_update\":true' in api_db_identity.stdout"
+        fail_msg: "BLOCKED: API runtime database identity/privilege view does not match accepted appts_runtime binding"
+
+    - name: Report safe API database identity evidence
+      ansible.builtin.debug:
+        var: api_db_identity.stdout
+
     - name: Generate mechanical HTTP message identity
       ansible.builtin.command: python3.9 -c "import uuid; print(uuid.uuid4())"
       register: http_message_id
@@ -166,6 +209,7 @@
     - name: Report safe HTTP Trial evidence
       ansible.builtin.debug:
         msg:
+          - "api_db_identity={{ api_db_identity.stdout }}"
           - "work_before={{ work_before.json }}"
           - "intake_before={{ intake_before.json }}"
           - "http_replay={{ http_replay.json }}"
