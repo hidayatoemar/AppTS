@@ -1,4 +1,7 @@
-import { Pool, type PoolConfig } from "pg";
+import { Pool, type PoolClient, type PoolConfig } from "pg";
+
+export type PersistencePool = Pool;
+export type PersistenceClient = PoolClient;
 
 export {
   isSerializationFailure,

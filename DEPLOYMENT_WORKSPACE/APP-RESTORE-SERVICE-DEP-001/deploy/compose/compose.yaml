@@ -12,6 +12,7 @@ services:
       APPTS_STAGING_LABEL: ${APPTS_STAGING_LABEL:?APPTS_STAGING_LABEL must be supplied externally}
       APPTS_RUNTIME_DATABASE_URL: ${APPTS_RUNTIME_DATABASE_URL:?APPTS_RUNTIME_DATABASE_URL must be supplied externally}
       DATABASE_URL: ${APPTS_RUNTIME_DATABASE_URL:?APPTS_RUNTIME_DATABASE_URL must be supplied externally}
+      APPTS_TRIAL_DISCLOSURE_LABEL_REF: ${APPTS_TRIAL_DISCLOSURE_LABEL_REF:?APPTS_TRIAL_DISCLOSURE_LABEL_REF must be supplied externally}
     ports:
       - "127.0.0.1:8080:8080"
     restart: unless-stopped

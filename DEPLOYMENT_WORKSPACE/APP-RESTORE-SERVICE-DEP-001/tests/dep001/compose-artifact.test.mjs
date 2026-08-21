@@ -47,6 +47,7 @@ test("DEP Compose pins images, publishes only loopback API, and externalizes val
   assert.doesNotMatch(postgresService, /^\s+ports:/m);
   assert.match(compose, /DATABASE_URL: \$\{APPTS_RUNTIME_DATABASE_URL:\?/);
   assert.match(compose, /APPTS_RUNTIME_DATABASE_URL: \$\{APPTS_RUNTIME_DATABASE_URL:\?/);
+  assert.match(compose, /APPTS_TRIAL_DISCLOSURE_LABEL_REF: \$\{APPTS_TRIAL_DISCLOSURE_LABEL_REF:\?/);
   assert.doesNotMatch(compose, /(?:^|\n)\s*(?:POSTGRES_PASSWORD|DATABASE_URL):\s*(?!\$\{)[^\s#]+/);
   assert.doesNotMatch(composeOperational, /initdb|migrat|grant|worker|backup|restore/i);
 });
@@ -67,7 +68,7 @@ test("DEP Dockerfile builds and runs only the bounded API artifact", () => {
   assert.match(dockerfile, /npm ci --ignore-scripts --no-audit --no-fund/);
   assert.match(dockerfile, /npm run build:dep --workspace=apps\/api/);
   assert.match(dockerfile, /npm run build --workspace=apps\/web/);
-  for (const artifact of ["apps/api/dist", "apps/web/dist", "packages/config/dist", "packages/observability/dist"]) {
+  for (const artifact of ["apps/api/dist", "apps/web/dist", "packages/config/dist", "packages/core-d01/dist", "packages/observability/dist"]) {
     assert.match(dockerfile, new RegExp(`COPY --from=build /workspace/${artifact.replaceAll("/", "\\/")}`));
   }
   assert.match(dockerfile, /COPY deploy\/compose\/entrypoint\.sh \/usr\/local\/bin\/dep-entrypoint/);
@@ -126,6 +127,7 @@ test("DEP template and README carry placeholders and the partial-held boundary",
   for (const name of ["APPTS_RUNTIME_DATABASE_URL", "APPTS_POSTGRES_DB", "APPTS_POSTGRES_USER", "APPTS_POSTGRES_PASSWORD"]) {
     assert.match(envTemplate, new RegExp(`^${name}=<external-[^>]+>$`, "m"));
   }
+  assert.match(envTemplate, /^APPTS_TRIAL_DISCLOSURE_LABEL_REF=6f79da70-412f-469e-bcf7-f544f81b8aa7$/m);
   assert.doesNotMatch(envTemplate, /postgres:\/\/[^<\s]+|password\s*[:=]\s*[^<\s]+/i);
   assert.match(readme, /MCR-004\/G6/);
   assert.match(readme, /PASS_PARTIAL_HELD/);
