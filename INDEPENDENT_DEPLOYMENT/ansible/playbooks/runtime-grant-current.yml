@@ -37,3 +37,58 @@
       changed_when: true
 
 - import_playbook: runtime-grant.yml
+
+- name: Verify current runtime owner-flow privileges after accepted grant
+  hosts: independent
+  become: true
+  gather_facts: false
+  vars:
+    appts_compose_dir: /opt/appts-independent-restore-service/deploy/compose
+    appts_db_name: appts_dep001_independent
+
+  tasks:
+    - name: Read current runtime privilege subset required by admitted owner flow
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - exec
+          - -T
+          - postgres
+          - psql
+          - -X
+          - -U
+          - appts_admin
+          - -d
+          - "{{ appts_db_name }}"
+          - -Atqc
+          - >-
+            SELECT 'idempotency_select=' || has_table_privilege('appts_runtime','appts.idempotency_ledger','SELECT');
+            SELECT 'idempotency_insert=' || has_table_privilege('appts_runtime','appts.idempotency_ledger','INSERT');
+            SELECT 'pre_ticket_update=' || has_table_privilege('appts_runtime','appts.pre_ticket_case','UPDATE');
+            SELECT 'source_ref_insert=' || has_table_privilege('appts_runtime','appts.source_ref','INSERT');
+            SELECT 'appts_sys_usage=' || has_schema_privilege('appts_runtime','appts_sys','USAGE');
+            SELECT 'db_temporary=' || has_database_privilege('appts_runtime','appts_dep001_independent','TEMPORARY');
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      register: owner_flow_privileges
+      changed_when: false
+
+    - name: Require exact current least-privilege owner-flow subset
+      ansible.builtin.assert:
+        that:
+          - "'idempotency_select=true' in owner_flow_privileges.stdout_lines"
+          - "'idempotency_insert=true' in owner_flow_privileges.stdout_lines"
+          - "'pre_ticket_update=true' in owner_flow_privileges.stdout_lines"
+          - "'source_ref_insert=true' in owner_flow_privileges.stdout_lines"
+          - "'appts_sys_usage=false' in owner_flow_privileges.stdout_lines"
+          - "'db_temporary=false' in owner_flow_privileges.stdout_lines"
+        fail_msg: "BLOCKED: current source-backed runtime privilege subset did not materialize exactly"
+
+    - name: Report safe current runtime privilege evidence
+      ansible.builtin.debug:
+        var: owner_flow_privileges.stdout_lines
