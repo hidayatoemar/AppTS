@@ -36,7 +36,7 @@ jobs:
           test "$confirmation" = 'INDEPENDENT_NONPROD' || { echo 'BLOCKED: invalid confirmation token'; exit 2; }
           test -z "${extra:-}" || { echo 'BLOCKED: malformed request'; exit 2; }
           case "$action" in
-            preflight|deploy|start|status|dbobserve|runtimegrant|trialreplay|teardown) ;;
+            preflight|deploy|resync|codeverify|start|status|dbobserve|runtimegrant|trialreplay|teardown) ;;
             *) echo 'BLOCKED: unsupported action'; exit 2 ;;
           esac
           echo "REQUESTED_ACTION=$action" >> "$GITHUB_ENV"
@@ -64,6 +64,8 @@ jobs:
           printf '[independent]\nlocalhost ansible_connection=local\n' > inventory.ini
           ansible-playbook playbooks/preflight.yml --syntax-check
           ansible-playbook playbooks/deploy.yml --syntax-check
+          ansible-playbook playbooks/resync.yml --syntax-check
+          ansible-playbook playbooks/code-verify.yml --syntax-check
           ansible-playbook playbooks/start.yml --syntax-check
           ansible-playbook playbooks/status.yml --syntax-check
           ansible-playbook playbooks/db-observe.yml --syntax-check
@@ -116,6 +118,8 @@ jobs:
           case "$REQUESTED_ACTION" in
             preflight)    playbook=playbooks/preflight.yml ;;
             deploy)       playbook=playbooks/deploy.yml ;;
+            resync)       playbook=playbooks/resync.yml ;;
+            codeverify)   playbook=playbooks/code-verify.yml ;;
             start)        playbook=playbooks/start.yml ;;
             status)       playbook=playbooks/status.yml ;;
             dbobserve)    playbook=playbooks/db-observe.yml ;;
