@@ -105,4 +105,21 @@ Status: EXPERIMENTAL EVIDENCE ONLY
 - Minimum Operationally Useful RESTORE_SERVICE: NOT ESTABLISHED / BLOCKED.
 - Next action: WAIT MCR.
 
+## D-008 — MCR-to-DT-005 resume: target recovered, accepted Trial source delta not materialized in DT branch
+
+- Fresh authority: `MCR-to-DT-005_RESTORE_SERVICE_CODEX056_PASS_Acceptance_Stage3_2_Cloud_Deployment_Test_Continuation_and_User_Learning_Access_v1.0_CONTROLLED`.
+- Prior Stage 3.2 HOLD: RELEASED. DT resume authorized on isolated non-production lane; Hasan/Adit staging remains untouched.
+- Initial current-target status trigger: `a33cb677462d22576add41b523fc5d718d703bce`; Actions run `32471266506`; result FAILURE because `http://127.0.0.1:8080/healthz` returned connection refused. This was an existing-service stopped state, not a Product/source failure.
+- Authorized minimum recovery: added harness-only `start.yml` and workflow action to execute existing installed `docker compose ... up -d` without `--build`, source replacement, DB reset, migration, or seeding. Harness commits: `7c9af8d31555dd33f9f989db55b09e925088f936` and `6205063384f1490d659451dd2ea28f905db8b5a8`.
+- Recovery trigger: `29a83e57681b0b99832c700a63ca031a3fd57921`; Actions run `32471412080`; artifact ID `9442670480`; artifact SHA256 `87ffc5927a59887972ee8adacaf020545321645f185037dc8b211aa0580aba9a`.
+- Recovery result: PASS. Existing stack started; `healthz={"status":"ok"}` and `readyz={"status":"ready"}`; no rebuild, source replacement, or DB reset occurred.
+- Accepted dependency-closure basis: MCR accepted `CODEX-to-MCR-056` under `MCR-to-CODEX-042`. The accepted Trial-gated delta is explicitly limited to `apps/api/src/routes/ui-intents.ts` (accepted SHA-256 `dec733c25b3459546785f0fb6cd3b441a3a544fc004a3f52cb1a0e0ccdc27cb5`), `apps/api/src/routes/trial-disclosure-binding.ts` (`42c5387ba22312987b21b3fe4b0305a66fd7926750c686afac8bf30f93aaa98d`), and `tools/td-pre-001-governed-replay.mjs` (`0fb10a88584737541d0cbe88bc026a1c765fa5aab4e3a64964068ef8a35f0e1d`), with process-local Trial key `APPTS_TRIAL_DISCLOSURE_LABEL_REF`.
+- Current DT branch source identity mismatch: `apps/api/src/routes/trial-disclosure-binding.ts` is absent; `tools/td-pre-001-governed-replay.mjs` is not present in the DT repository; current `ui-intents.ts` remains the pre-closure version. Therefore the current running image cannot be claimed to contain the MCR-accepted CODEX056 Trial mechanism.
+- Publication/materialization finding: the CODEX056 return states the bounded delta was produced with `no remote Git action`; the accepted files are not materialized into the isolated DT Git branch, and no separate consumable source package/commit or DT-specific source-materialization authority was found.
+- Strict-boundary classification: STOP. MCR-to-DT-005 authorizes use of accepted implementation but explicitly does not authorize new source changes except under an existing explicit DT authority; applying or reconstructing the missing source delta inside DT would be a source mutation/materialization decision not explicitly bound by the artifact.
+- Browser exposure/workflow exercise: NOT REACHED. A healthy pre-closure runtime is insufficient because source/runtime identity cannot be verified against the accepted Trial path.
+- No Product/API/UI/business/lifecycle/Role/authority/policy semantic change performed.
+- No manual canonical seeding, new dummy data, schema/migration change, real data, Production/UAT activation, credential broadening, or Hasan/Adit staging modification performed.
+- Required next action: WAIT MCR for an explicit accepted source materialization/transfer binding (e.g. admitted commit/package or explicit DT authority to apply the exact accepted CODEX056 delta) before deployment/rebuild and browser workflow continuation.
+
 No Hasan/Adit troubleshooting commit is imported or cherry-picked. Corrections are independently derived from reproduced evidence and bounded MCR authority. No Product semantics were invented.
