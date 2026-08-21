@@ -18,6 +18,10 @@ P3='DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/tests/dep001/idempotency-mi
 rm -rf "$TMP"
 mkdir -p "$TMP/extract"
 
+# actions/checkout uses depth=1 in the established DT workflow; deepen only the
+# isolated experiment branch enough to make the admitted base available locally.
+git fetch --no-tags --deepen=100 origin experiment/independent-restore-deploy
+git cat-file -e "$BASE^{commit}"
 git merge-base --is-ancestor "$BASE" HEAD
 git diff --quiet "$BASE" -- "$P1" "$P2" "$P3"
 
