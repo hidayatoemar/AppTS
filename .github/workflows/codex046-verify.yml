@@ -36,6 +36,83 @@ jobs:
           test "$(node --version)" = "v24.19.0"
           test "$(npm --version)" = "11.17.0"
           npm ci --ignore-scripts --no-audit --no-fund
+      - name: Apply architecture-owned PostgreSQL binding correction
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+
+          def replace(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"expected text not found in {path}: {old!r}")
+              p.write_text(text.replace(old, new))
+
+          replace(
+              "packages/persistence/src/index.ts",
+              'import { Pool, type PoolConfig } from "pg";',
+              'import { Pool, type PoolClient, type PoolConfig } from "pg";\n\nexport type PersistencePool = Pool;\nexport type PersistenceClient = PoolClient;',
+          )
+          replace(
+              "apps/api/src/dep-bootstrap.ts",
+              'import { Pool } from "pg";',
+              'import { createPersistencePool, type PersistencePool } from "@appts-restore-service/persistence";',
+          )
+          replace("apps/api/src/dep-bootstrap.ts", "readonly pool?: Pool;", "readonly pool?: PersistencePool;")
+          replace(
+              "apps/api/src/dep-bootstrap.ts",
+              "? new Pool({ connectionString: config.databaseUrl })",
+              "? createPersistencePool({ connectionString: config.databaseUrl })",
+          )
+          replace(
+              "apps/api/src/projections/trial-projection-port.ts",
+              'import type { Pool } from "pg";',
+              'import type { PersistencePool } from "@appts-restore-service/persistence";',
+          )
+          replace("apps/api/src/projections/trial-projection-port.ts", "pool: Pool", "pool: PersistencePool")
+          replace(
+              "apps/api/src/trial/pre-ticket-trial-owner-flow.ts",
+              'import type { Pool, PoolClient } from "pg";',
+              'import type { PersistenceClient, PersistencePool } from "@appts-restore-service/persistence";',
+          )
+          replace("apps/api/src/trial/pre-ticket-trial-owner-flow.ts", "pool: Pool", "pool: PersistencePool")
+          replace("apps/api/src/trial/pre-ticket-trial-owner-flow.ts", "client: PoolClient", "client: PersistenceClient")
+
+          for package_path in ["packages/persistence/package.json", "packages/core-d01/package.json"]:
+              p = Path(package_path)
+              data = json.loads(p.read_text())
+              data["main"] = "./dist/index.js"
+              data["types"] = "./dist/index.d.ts"
+              data["exports"] = {
+                  ".": {
+                      "types": "./dist/index.d.ts",
+                      "import": "./dist/index.js",
+                      "default": "./dist/index.js",
+                  }
+              }
+              p.write_text(json.dumps(data, indent=2) + "\n")
+
+          tsconfig = Path("apps/api/tsconfig.json")
+          data = json.loads(tsconfig.read_text())
+          refs = data.setdefault("references", [])
+          if not any(item.get("path") == "../../packages/persistence" for item in refs):
+              refs.append({"path": "../../packages/persistence"})
+          tsconfig.write_text(json.dumps(data, indent=2) + "\n")
+
+          replace(
+              "Dockerfile.dep",
+              "COPY packages/core-d01 packages/core-d01\nCOPY packages/observability packages/observability",
+              "COPY packages/core-d01 packages/core-d01\nCOPY packages/observability packages/observability\nCOPY packages/persistence packages/persistence",
+          )
+          replace(
+              "Dockerfile.dep",
+              "COPY --from=build /workspace/packages/observability/dist ./packages/observability/dist",
+              "COPY --from=build /workspace/packages/observability/dist ./packages/observability/dist\nCOPY --from=build /workspace/packages/persistence/dist ./packages/persistence/dist",
+          )
+          PY
+          git diff --check
       - name: Typecheck build and existing suites
         run: |
           set -euo pipefail
@@ -92,6 +169,27 @@ jobs:
           pgcid="$(docker ps --filter ancestor=postgres:17.11-bookworm -q | head -n1)"
           counts="$(docker exec -e PGPASSWORD="$PGPASSWORD" "$pgcid" psql -X -At -U postgres -d appts_codex046 -c "SELECT (SELECT count(*) FROM appts.ticket_identity)||'|'||(SELECT count(*) FROM appts.ticket_formation_record)||'|'||(SELECT count(*) FROM appts.runtime_ticket)||'|'||(SELECT count(*) FROM appts.pre_ticket_case);")"
           echo "db_counts=$counts"; test "$counts" = "0|0|0|1"
+      - name: Build deterministic DT transfer overlay
+        if: success()
+        working-directory: .
+        run: |
+          set -euo pipefail
+          root='DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001'
+          base="$(git rev-parse HEAD^1)"
+          mkdir -p codex046-transfer/overlay
+          mapfile -t files < <(git diff --name-only "$base" -- "$root")
+          test "${#files[@]}" -gt 0
+          for file in "${files[@]}"; do
+            rel="${file#${root}/}"
+            mkdir -p "codex046-transfer/overlay/$(dirname "$rel")"
+            cp "$file" "codex046-transfer/overlay/$rel"
+          done
+          (cd codex046-transfer/overlay && find . -type f -print0 | sort -z | xargs -0 sha256sum) > codex046-transfer/FILES.sha256
+          git diff --binary "$base" -- "$root" > codex046-transfer/CODEX046_CONSTRUCTION.patch
+          printf 'base=%s\nhead=%s\n' "$base" "$GITHUB_SHA" > codex046-transfer/IDENTITY.txt
+          cat > codex046-transfer/APPLY_AND_VERIFY.md <<'EOF'
+          Apply only to the admitted RESTORE_SERVICE DT source derived from the MCR-accepted CODEX056 transfer and current DT Stage 3.2 source. Copy overlay/ paths over the source root, then verify each SHA-256 in FILES.sha256. Do not apply to Production/UAT or real-data environments. Re-run exact Node 24.19.0 / npm 11.17.0 build/tests, V001-V004 verifiers, health/readiness, UI read endpoints, TD-PRE-001 CREATED -> IDEMPOTENT_REPLAY -> CONFLICT_HOLD, and confirm zero Ticket manufacture for the incomplete Trial case.
+          EOF
       - name: Evidence
         if: always()
         working-directory: .
@@ -104,4 +202,10 @@ jobs:
         with:
           name: codex046-self-verification-${{ github.run_id }}
           path: codex046-evidence
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: codex046-dt-transfer-${{ github.run_id }}
+          path: codex046-transfer
           retention-days: 30
