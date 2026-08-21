@@ -84,6 +84,7 @@ result = {
     },
     "identical_concurrency": {
         "results": identical_results,
+        "created": identical_created[0] if len(identical_created) == 1 else None,
         "created_count": len(identical_created),
         "replay_count": len(identical_replays),
         "conflict_count": len(identical_conflicts),
