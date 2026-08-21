@@ -1,0 +1,105 @@
+name: CODEX046 HTTP composition self-verification
+on:
+  push:
+    branches: [mcr/codex046-http-composition-verify]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17.11-bookworm
+        env:
+          POSTGRES_DB: appts_codex046
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: codex046-local-only
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d appts_codex046"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24.19.0 }
+      - name: Exact toolchain and lock install
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.17.0
+          test "$(node --version)" = "v24.19.0"
+          test "$(npm --version)" = "11.17.0"
+          npm ci --ignore-scripts --no-audit --no-fund
+      - name: Typecheck build and existing suites
+        run: |
+          set -euo pipefail
+          npm run verify:boundaries
+          npm run typecheck
+          npm run build
+          npm run test:contracts
+          npm run test:integration
+          npm run test:dg04
+          npm run test:adverse
+          npm run test:unit
+          npm run test:nfr
+          node --experimental-strip-types --test tests/dep001/*.test.ts tests/dep001/*.test.mjs
+      - name: Docker build
+        run: docker build -f Dockerfile.dep -t codex046-dep-api:verify .
+      - name: V001-V004 and schema verifiers
+        env: { PGPASSWORD: codex046-local-only }
+        run: |
+          set -euo pipefail
+          pgcid="$(docker ps --filter ancestor=postgres:17.11-bookworm -q | head -n1)"; test -n "$pgcid"
+          for f in db/migrations/V001__cf01_core_schema.sql db/migrations/V002__cf01_runtime_and_exchange_schema.sql db/migrations/V003__dg04_diagnostic_persistence.sql db/migrations/V004__d05_pending_capture_v2.sql; do docker exec -e PGPASSWORD="$PGPASSWORD" -i "$pgcid" psql -X -v ON_ERROR_STOP=1 -U postgres -d appts_codex046 < "$f"; done
+          for f in db/verify/001_cf01_constraints.sql db/verify/002_cf01_history_inbox_outbox.sql db/verify/003_dg04_diagnostics.sql; do docker exec -e PGPASSWORD="$PGPASSWORD" -e PGTZ=UTC -i "$pgcid" psql -X -v ON_ERROR_STOP=1 -U postgres -d appts_codex046 < "$f"; done
+      - name: HTTP composition governed replay and no-ticket check
+        env:
+          DATABASE_URL: postgresql://postgres:codex046-local-only@127.0.0.1:5432/appts_codex046
+          API_LISTEN_PORT: "8080"
+          APPTS_TRIAL_DISCLOSURE_LABEL_REF: 6f79da70-412f-469e-bcf7-f544f81b8aa7
+          PGPASSWORD: codex046-local-only
+        run: |
+          set -euo pipefail
+          node apps/api/dist/dep-bootstrap.js >/tmp/codex046-api.log 2>&1 & api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true; wait "$api_pid" 2>/dev/null || true; cat /tmp/codex046-api.log || true' EXIT
+          for i in $(seq 1 30); do curl --fail --silent http://127.0.0.1:8080/healthz >/tmp/health.json && break || sleep 1; done
+          curl --fail --silent http://127.0.0.1:8080/healthz | tee /tmp/health.json
+          curl --fail --silent http://127.0.0.1:8080/readyz | tee /tmp/ready.json
+          curl --fail --silent http://127.0.0.1:8080/api/v1/ui/work-queue | tee /tmp/work-before.json
+          curl --fail --silent http://127.0.0.1:8080/api/v1/ui/intake | tee /tmp/intake-before.json
+          printf '%s' '{"intent_contract_ref":"APPTS.CORE.D01.PRETICKET_ADMISSION.SUBMISSION / 1.0.0","payload":{"messageId":"10000000-0000-4000-8000-000000000001","idempotencyKey":"20000000-0000-4000-8000-000000000001","correlationId":"30000000-0000-4000-8000-000000000001","trialContext":"TD-PRE-001"}}' >/tmp/intent.json
+          curl --fail --silent -H 'content-type: application/json' --data-binary @/tmp/intent.json http://127.0.0.1:8080/api/v1/ui/intents | tee /tmp/first.json
+          curl --fail --silent -H 'content-type: application/json' --data-binary @/tmp/intent.json http://127.0.0.1:8080/api/v1/ui/intents | tee /tmp/second.json
+          node -e 'const fs=require("fs"),p=JSON.parse(fs.readFileSync("/tmp/intent.json"));p.payload.conflictProbe=true;fs.writeFileSync("/tmp/conflict.json",JSON.stringify(p))'
+          curl --fail --silent -H 'content-type: application/json' --data-binary @/tmp/conflict.json http://127.0.0.1:8080/api/v1/ui/intents | tee /tmp/conflict-result.json
+          curl --fail --silent http://127.0.0.1:8080/api/v1/ui/intake | tee /tmp/intake-after.json
+          curl --fail --silent http://127.0.0.1:8080/api/v1/ui/work-queue | tee /tmp/work-after.json
+          node - <<'NODE'
+          const fs=require('fs'),j=p=>JSON.parse(fs.readFileSync(p));
+          const h=j('/tmp/health.json'),r=j('/tmp/ready.json'),w0=j('/tmp/work-before.json'),i0=j('/tmp/intake-before.json'),a=j('/tmp/first.json'),b=j('/tmp/second.json'),x=j('/tmp/conflict-result.json'),i=j('/tmp/intake-after.json'),w=j('/tmp/work-after.json');
+          if(h.status!=='ok'||r.status!=='ready'||w0.data.ticket_count!==0||i0.data.case_count!==0) throw Error('initial HTTP mismatch');
+          if(a.disposition!=='CREATED'||a.assessmentResult!=='NOT_ACCEPTABLE'||a.decision!=='HOLD_AS_PRE_TICKET') throw Error('owner mismatch');
+          if(b.disposition!=='IDEMPOTENT_REPLAY'||b.caseId!==a.caseId||x.disposition!=='CONFLICT_HOLD') throw Error('replay mismatch');
+          const c=i.data.cases[0]; if(i.data.case_count!==1||c.case_id!==a.caseId||c.case_status_ref!=='HOLD_AS_PRE_TICKET'||c.assessment_result!=='NOT_ACCEPTABLE'||c.completeness_result!=='MISSING'||c.completeness_reason!=='INCOMPLETE_MANDATORY_FACTS'||w.data.ticket_count!==0) throw Error('projection/no-ticket mismatch');
+          console.log(JSON.stringify({first:a,second:b,conflict:x,intake:i,work:w},null,2));
+          NODE
+          pgcid="$(docker ps --filter ancestor=postgres:17.11-bookworm -q | head -n1)"
+          counts="$(docker exec -e PGPASSWORD="$PGPASSWORD" "$pgcid" psql -X -At -U postgres -d appts_codex046 -c "SELECT (SELECT count(*) FROM appts.ticket_identity)||'|'||(SELECT count(*) FROM appts.ticket_formation_record)||'|'||(SELECT count(*) FROM appts.runtime_ticket)||'|'||(SELECT count(*) FROM appts.pre_ticket_case);")"
+          echo "db_counts=$counts"; test "$counts" = "0|0|0|1"
+      - name: Evidence
+        if: always()
+        working-directory: .
+        run: |
+          mkdir -p codex046-evidence
+          cp /tmp/health.json /tmp/ready.json /tmp/work-before.json /tmp/intake-before.json /tmp/first.json /tmp/second.json /tmp/conflict-result.json /tmp/intake-after.json /tmp/work-after.json /tmp/codex046-api.log codex046-evidence/ 2>/dev/null || true
+          printf 'commit=%s\nnode=24.19.0\nnpm=11.17.0\n' "$GITHUB_SHA" >codex046-evidence/IDENTITY.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: codex046-self-verification-${{ github.run_id }}
+          path: codex046-evidence
+          retention-days: 30

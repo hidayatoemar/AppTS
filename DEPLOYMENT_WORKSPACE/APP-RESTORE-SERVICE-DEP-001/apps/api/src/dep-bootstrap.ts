@@ -3,8 +3,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyStatic from "@fastify/static";
+import { Pool } from "pg";
 import { apiConfigFromEnv, type ApiConfig, type Env } from "@appts-restore-service/config";
 import { createLogger, type Logger } from "@appts-restore-service/observability";
+import { composeApi, type ApiComposition } from "./composition.ts";
+import { createTrialProjectionPort } from "./projections/trial-projection-port.ts";
+import { registerUiHttpRoutes } from "./routes/ui-http.ts";
+import { createTrialPreTicketIntentDispatcher } from "./trial/pre-ticket-trial-owner-flow.ts";
 
 const DEP_COMPONENT = "api-dep001";
 const SERVICE_WORKER_PATH = "/service-worker.js";
@@ -15,12 +20,15 @@ const defaultStaticRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../.
 export interface DepBootstrapOptions {
   readonly env?: Env;
   readonly staticRoot?: string;
+  readonly composition?: ApiComposition;
+  readonly pool?: Pool;
 }
 
 export interface DepBootstrap {
   readonly app: FastifyInstance;
   readonly config: ApiConfig;
   readonly staticRoot: string;
+  readonly composition: ApiComposition;
   readonly close: () => Promise<void>;
 }
 
@@ -130,6 +138,18 @@ export async function createDepBootstrapServer(options: DepBootstrapOptions = {}
     throw error;
   }
 
+  const ownedPool = options.composition === undefined && options.pool === undefined
+    ? new Pool({ connectionString: config.databaseUrl })
+    : undefined;
+  const pool = options.pool ?? ownedPool;
+  const composition = options.composition ?? composeApi({
+    projections: createTrialProjectionPort(pool!),
+    intents: createTrialPreTicketIntentDispatcher(pool!),
+    diagnostics: Object.freeze({
+      async retrieve(): Promise<never> { throw new Error("DIAGNOSTIC_AUTHORITY_BINDING_REQUIRED"); },
+    }),
+  });
+
   const app = fastify({ logger: false });
   await app.register(fastifyStatic, {
     root: staticRoot,
@@ -138,15 +158,17 @@ export async function createDepBootstrapServer(options: DepBootstrapOptions = {}
     index: false,
     redirect: false,
   });
+  registerUiHttpRoutes(app, composition);
   registerDeploymentRoutes(app);
 
   const close = async (): Promise<void> => {
     await app.close();
+    if (ownedPool !== undefined) await ownedPool.end();
     logger.info("DEP API stopped");
   };
 
-  logger.info({ port: config.apiPort, staticBootstrap: "ready" }, "DEP API prepared");
-  return Object.freeze({ app, config, staticRoot, close });
+  logger.info({ port: config.apiPort, staticBootstrap: "ready", uiComposition: "registered" }, "DEP API prepared");
+  return Object.freeze({ app, config, staticRoot, composition, close });
 }
 
 export async function startDepBootstrap(options: DepBootstrapOptions = {}): Promise<DepBootstrap> {

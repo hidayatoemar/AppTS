@@ -26,6 +26,7 @@ COPY apps/api apps/api
 COPY apps/web apps/web
 COPY packages/config packages/config
 COPY packages/contracts packages/contracts
+COPY packages/core-d01 packages/core-d01
 COPY packages/observability packages/observability
 
 RUN npm run build:dep --workspace=apps/api
@@ -60,6 +61,7 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 COPY --from=build /workspace/apps/api/dist ./apps/api/dist
 COPY --from=build /workspace/apps/web/dist ./apps/web/dist
 COPY --from=build /workspace/packages/config/dist ./packages/config/dist
+COPY --from=build /workspace/packages/core-d01/dist ./packages/core-d01/dist
 COPY --from=build /workspace/packages/observability/dist ./packages/observability/dist
 COPY deploy/compose/entrypoint.sh /usr/local/bin/dep-entrypoint
 COPY deploy/compose/entrypoint.g6-crash-once.test.sh /usr/local/lib/dep/entrypoint.g6-crash-once.test.sh
