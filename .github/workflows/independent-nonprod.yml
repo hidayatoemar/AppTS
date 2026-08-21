@@ -70,6 +70,7 @@ jobs:
           ansible-playbook playbooks/status.yml --syntax-check
           ansible-playbook playbooks/db-observe.yml --syntax-check
           ansible-playbook playbooks/runtime-grant.yml --syntax-check
+          ansible-playbook playbooks/runtime-grant-current.yml --syntax-check
           ansible-playbook playbooks/trial-replay.yml --syntax-check
           ansible-playbook playbooks/http-trial.yml --syntax-check
           ansible-playbook playbooks/teardown.yml --syntax-check
@@ -124,7 +125,7 @@ jobs:
             start)        playbook=playbooks/start.yml ;;
             status)       playbook=playbooks/status.yml ;;
             dbobserve)    playbook=playbooks/db-observe.yml ;;
-            runtimegrant) playbook=playbooks/runtime-grant.yml ;;
+            runtimegrant) playbook=playbooks/runtime-grant-current.yml ;;
             trialreplay)  playbook=playbooks/trial-replay.yml ;;
             httptrial)    playbook=playbooks/http-trial.yml ;;
             teardown)     playbook=playbooks/teardown.yml ;;
