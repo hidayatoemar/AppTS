@@ -10,6 +10,7 @@ on:
 permissions:
   contents: write
   statuses: write
+  actions: read
 
 concurrency:
   group: independent-restore-nonprod
@@ -36,7 +37,7 @@ jobs:
           test "$confirmation" = 'INDEPENDENT_NONPROD' || { echo 'BLOCKED: invalid confirmation token'; exit 2; }
           test -z "${extra:-}" || { echo 'BLOCKED: malformed request'; exit 2; }
           case "$action" in
-            preflight|deploy|resync|codeverify|start|status|dbobserve|runtimegrant|trialreplay|httptrial|teardown) ;;
+            preflight|deploy|resync|codeverify|start|status|dbobserve|runtimegrant|trialreplay|httptrial|apply049|teardown) ;;
             *) echo 'BLOCKED: unsupported action'; exit 2 ;;
           esac
           echo "REQUESTED_ACTION=$action" >> "$GITHUB_ENV"
@@ -114,6 +115,8 @@ jobs:
       - name: Execute requested independent action
         working-directory: INDEPENDENT_DEPLOYMENT/ansible
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p ../../INDEPENDENT_DEPLOYMENT/evidence
@@ -128,6 +131,7 @@ jobs:
             runtimegrant) playbook=playbooks/runtime-grant-current.yml ;;
             trialreplay)  playbook=playbooks/trial-replay.yml ;;
             httptrial)    playbook=playbooks/http-trial.yml ;;
+            apply049)     playbook='' ;;
             teardown)     playbook=playbooks/teardown.yml ;;
             *) echo 'BLOCKED: unsupported action'; exit 2 ;;
           esac
@@ -136,7 +140,11 @@ jobs:
             echo "experiment_commit=${GITHUB_SHA}"
             echo "action=${REQUESTED_ACTION}"
             echo "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            ansible-playbook "$playbook"
+            if [ "$REQUESTED_ACTION" = 'apply049' ]; then
+              bash ../scripts/apply-codex049.sh
+            else
+              ansible-playbook "$playbook"
+            fi
             echo "completed_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } 2>&1 | tee ../../INDEPENDENT_DEPLOYMENT/evidence/github-actions-${GITHUB_RUN_ID}.txt
           echo 'ACTION_EXECUTION=PASS' >> "$GITHUB_ENV"
