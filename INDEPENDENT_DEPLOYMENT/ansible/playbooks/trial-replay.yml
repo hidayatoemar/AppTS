@@ -63,13 +63,7 @@
 
     - name: Package accepted SOURCE_SNAPSHOT root once on Actions runner
       ansible.builtin.command:
-        argv:
-          - tar
-          - -C
-          - "{{ trial_source_src }}"
-          - -czf
-          - "{{ trial_source_archive }}"
-          - .
+        argv: [tar, -C, "{{ trial_source_src }}", -czf, "{{ trial_source_archive }}", .]
       delegate_to: localhost
       become: false
       changed_when: true
@@ -151,31 +145,14 @@
 
     - name: Ensure PostgreSQL service is running without reset
       ansible.builtin.command:
-        argv:
-          - docker
-          - compose
-          - -f
-          - compose.yaml
-          - --env-file
-          - .env
-          - up
-          - -d
-          - postgres
+        argv: [docker, compose, -f, compose.yaml, --env-file, .env, up, -d, postgres]
       args:
         chdir: "{{ appts_compose_dir }}"
       changed_when: true
 
     - name: Locate current isolated DB network
       ansible.builtin.command:
-        argv:
-          - docker
-          - network
-          - ls
-          - --filter
-          - label=com.docker.compose.project=appts-restore-service-dep001
-          - --filter
-          - label=com.docker.compose.network=dep-db-internal
-          - -q
+        argv: [docker, network, ls, --filter, label=com.docker.compose.project=appts-restore-service-dep001, --filter, label=com.docker.compose.network=dep-db-internal, -q]
       register: db_network
       changed_when: false
 
@@ -264,18 +241,7 @@
 
     - name: Build governed Trial runner from accepted SOURCE_SNAPSHOT dependency state
       ansible.builtin.command:
-        argv:
-          - docker
-          - buildx
-          - build
-          - --load
-          - --platform
-          - linux/amd64
-          - -f
-          - "{{ trial_dockerfile }}"
-          - -t
-          - "{{ trial_runner_image }}"
-          - "{{ trial_source_dir }}"
+        argv: [docker, buildx, build, --load, --platform, linux/amd64, -f, "{{ trial_dockerfile }}", -t, "{{ trial_runner_image }}", "{{ trial_source_dir }}"]
       changed_when: true
 
     - name: Execute governed replay and readback with temporary credential envelope
@@ -314,6 +280,13 @@
           register: replay_result
           changed_when: true
           failed_when: false
+
+        - name: Report safe replay process diagnostics
+          ansible.builtin.debug:
+            msg:
+              - "replay_rc={{ replay_result.rc }}"
+              - "replay_stdout={{ replay_result.stdout_lines }}"
+              - "replay_stderr={{ replay_result.stderr_lines }}"
 
         - name: Require exact replay process success
           ansible.builtin.assert:
