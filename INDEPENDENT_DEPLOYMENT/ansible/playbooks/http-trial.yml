@@ -126,9 +126,9 @@
           - -Atqc
           - >-
             WITH expected(case_id,idem_key) AS (VALUES
-              ('{{ http_proof_json.sequential.created.caseId }}'::uuid,'{{ http_proof_json["keys"]["sequential"] }}'),
-              ('{{ http_proof_json.identical_concurrency.created.caseId }}'::uuid,'{{ http_proof_json["keys"]["identical"] }}'),
-              ('{{ http_proof_json.mixed_concurrency.seed.caseId }}'::uuid,'{{ http_proof_json["keys"]["mixed"] }}'))
+              ('{{ http_proof_json.sequential.created.caseId }}'::uuid,'{{ http_proof_json["keys"]["sequential"] }}'::uuid),
+              ('{{ http_proof_json.identical_concurrency.created.caseId }}'::uuid,'{{ http_proof_json["keys"]["identical"] }}'::uuid),
+              ('{{ http_proof_json.mixed_concurrency.seed.caseId }}'::uuid,'{{ http_proof_json["keys"]["mixed"] }}'::uuid))
             SELECT 'case_count=' || count(*) FROM appts.pre_ticket_case p JOIN expected e ON e.case_id=p.case_id;
             WITH expected(case_id) AS (VALUES
               ('{{ http_proof_json.sequential.created.caseId }}'::uuid),
@@ -146,9 +146,9 @@
               ('{{ http_proof_json.mixed_concurrency.seed.caseId }}'::uuid))
             SELECT 'cue_count=' || count(*) FROM appts.intake_cue c JOIN appts.source_observation o ON o.cue_id=c.cue_id JOIN appts.pre_ticket_case p ON p.governing_observation_ref=o.observation_id JOIN expected e ON e.case_id=p.case_id;
             WITH expected(case_id,idem_key) AS (VALUES
-              ('{{ http_proof_json.sequential.created.caseId }}'::uuid,'{{ http_proof_json["keys"]["sequential"] }}'),
-              ('{{ http_proof_json.identical_concurrency.created.caseId }}'::uuid,'{{ http_proof_json["keys"]["identical"] }}'),
-              ('{{ http_proof_json.mixed_concurrency.seed.caseId }}'::uuid,'{{ http_proof_json["keys"]["mixed"] }}'))
+              ('{{ http_proof_json.sequential.created.caseId }}'::uuid,'{{ http_proof_json["keys"]["sequential"] }}'::uuid),
+              ('{{ http_proof_json.identical_concurrency.created.caseId }}'::uuid,'{{ http_proof_json["keys"]["identical"] }}'::uuid),
+              ('{{ http_proof_json.mixed_concurrency.seed.caseId }}'::uuid,'{{ http_proof_json["keys"]["mixed"] }}'::uuid))
             SELECT 'ledger_map_count=' || count(*) FROM appts.idempotency_ledger l JOIN expected e ON e.idem_key=l.idempotency_key AND e.case_id=l.durable_result_ref WHERE l.owner_domain_ref='APPTS.CORE.D01.PRETICKET_ADMISSION.OWNER';
             WITH expected(case_id) AS (VALUES
               ('{{ http_proof_json.sequential.created.caseId }}'::uuid),
