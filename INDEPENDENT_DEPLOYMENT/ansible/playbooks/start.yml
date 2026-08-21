@@ -1,0 +1,59 @@
+---
+- name: Start existing independent RESTORE_SERVICE non-production stack without rebuild
+  hosts: independent
+  become: true
+  gather_facts: false
+  vars:
+    appts_compose_dir: /opt/appts-independent-restore-service/deploy/compose
+  tasks:
+    - name: Require existing Compose environment
+      ansible.builtin.stat:
+        path: "{{ appts_compose_dir }}/.env"
+      register: compose_env
+
+    - name: Refuse start if existing deployment material is absent
+      ansible.builtin.assert:
+        that:
+          - compose_env.stat.exists
+        fail_msg: "BLOCKED: existing isolated DT deployment material is absent"
+
+    - name: Start existing installed Compose stack without build or reset
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - up
+          - -d
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      changed_when: true
+
+    - name: Wait for existing loopback health endpoint
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/healthz
+        method: GET
+        status_code: 200
+        return_content: true
+      register: healthz
+      retries: 18
+      delay: 5
+      until: healthz.status == 200
+
+    - name: Verify existing loopback readiness endpoint
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/readyz
+        method: GET
+        status_code: 200
+        return_content: true
+      register: readyz
+
+    - name: Report safe start evidence
+      ansible.builtin.debug:
+        msg:
+          - "healthz={{ healthz.content }}"
+          - "readyz={{ readyz.content }}"
+          - "Existing installed stack started without rebuild, source replacement, or DB reset."
