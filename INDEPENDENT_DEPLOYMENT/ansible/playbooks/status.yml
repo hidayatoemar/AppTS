@@ -4,6 +4,7 @@
   become: true
   gather_facts: false
   vars:
+    appts_install_dir: /opt/appts-independent-restore-service
     appts_compose_dir: /opt/appts-independent-restore-service/deploy/compose
     appts_db_name: appts_dep001_independent
   tasks:
@@ -56,6 +57,24 @@
         chdir: "{{ appts_compose_dir }}"
       changed_when: false
       register: compose_ps
+
+    - name: Capture exact deployed CODEX049 overlay hashes
+      ansible.builtin.command:
+        argv:
+          - sha256sum
+          - "{{ appts_install_dir }}/apps/api/src/trial/pre-ticket-trial-owner-flow.ts"
+          - "{{ appts_install_dir }}/deploy/db/grant-runtime.sh"
+          - "{{ appts_install_dir }}/tests/dep001/idempotency-minimum-runtime-writer.test.mjs"
+      changed_when: false
+      register: deployed_overlay_hashes
+
+    - name: Capture deployed Compose image identities
+      ansible.builtin.command:
+        argv: [docker, compose, -f, compose.yaml, --env-file, .env, images]
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      changed_when: false
+      register: compose_images
 
     - name: Probe API database identity through its own DATABASE_URL
       ansible.builtin.command:
@@ -129,13 +148,16 @@
       changed_when: false
       register: privilege_matrix
 
-    - name: Require Stage 3.2 health, projection, runtime identity, and security contract
+    - name: Require Stage 3.2 health, source identity, projection, runtime identity, and security contract
       ansible.builtin.assert:
         that:
           - healthz.json.status == 'ok'
           - readyz.json.status == 'ready'
           - work_queue_probe.json.view_id == 'UX-RS-01'
           - intake_probe.json.view_id == 'UX-RS-02'
+          - "deployed_overlay_hashes.stdout_lines[0].split()[0] == 'fa6a57a4bb50fdd63884d86ce43fe2b18137c3c0b0554b2b990d57d2771c6106'"
+          - "deployed_overlay_hashes.stdout_lines[1].split()[0] == '41b48d45bb88c7e510a88235840b8601658d08e5347e9f7660419f7efc321f0f'"
+          - "deployed_overlay_hashes.stdout_lines[2].split()[0] == 'cba0366d557510b456e725198a38297dad30f5f1d2421e3f381ed032887ee32f'"
           - "'\"env_user\":\"appts_runtime\"' in api_db_identity.stdout"
           - "'\"env_db\":\"appts_dep001_independent\"' in api_db_identity.stdout"
           - "'\"db_user\":\"appts_runtime\"' in api_db_identity.stdout"
@@ -160,7 +182,7 @@
           - "'idempotency_insert=true' in privilege_matrix.stdout_lines"
           - "'idempotency_update=false' in privilege_matrix.stdout_lines"
           - "'idempotency_delete=false' in privilege_matrix.stdout_lines"
-        fail_msg: "BLOCKED: Stage 3.2 runtime identity/security/projection state differs from MCR-to-DT-012"
+        fail_msg: "BLOCKED: Stage 3.2 source/runtime identity/security/projection state differs from MCR-to-DT-012"
 
     - name: Capture bounded API log tail
       ansible.builtin.command:
@@ -170,7 +192,7 @@
       changed_when: false
       register: api_logs
 
-    - name: Report status and exact security evidence
+    - name: Report status and exact source/security evidence
       ansible.builtin.debug:
         msg:
           - "healthz={{ healthz.content }}"
@@ -178,6 +200,8 @@
           - "root_http_status={{ root_http.status }}"
           - "work_queue={{ work_queue_probe.json }}"
           - "intake={{ intake_probe.json }}"
+          - "deployed_overlay_hashes={{ deployed_overlay_hashes.stdout_lines }}"
+          - "compose_images={{ compose_images.stdout_lines }}"
           - "api_db_identity={{ api_db_identity.stdout }}"
           - "privilege_matrix={{ privilege_matrix.stdout_lines }}"
           - "compose_ps={{ compose_ps.stdout_lines }}"
