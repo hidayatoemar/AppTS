@@ -23,8 +23,14 @@
             npm run verify:boundaries
             npm run typecheck
             npm run build
-            node --experimental-strip-types --test tests/integration/ui-routes.integration.test.ts
-            node --experimental-strip-types --test tests/dep001/api-bootstrap.test.ts tests/dep001/compose-artifact.test.mjs
+            npm run test:contracts
+            npm run test:integration
+            npm run test:dg04
+            npm run test:adverse
+            npm run test:unit
+            npm run test:nfr
+            node --experimental-strip-types --test tests/dep001/*.test.ts
+            node --test tests/dep001/idempotency-minimum-runtime-writer.test.mjs
           '
       args:
         executable: /bin/bash
@@ -37,4 +43,8 @@
           - "code_verify_rc={{ code_verify.rc }}"
           - "controlled_node=24.19.0"
           - "controlled_npm=11.17.0"
-          - "boundary_typecheck_build_http_tests=PASS"
+          - "architecture_boundary=PASS"
+          - "full_typecheck_build=PASS"
+          - "contracts_integration_dg04_adverse_unit_nfr=PASS"
+          - "dep_typescript_suite=PASS"
+          - "codex049_focused_writer_idempotency=PASS"
