@@ -1,43 +1,24 @@
 ---
-- name: Verify governed TD-PRE-001 through admitted HTTP UI intent path
+- name: Prove governed TD-PRE-001 through actual least-privilege HTTP runtime path
   hosts: independent
   become: true
   gather_facts: false
   vars:
     appts_compose_dir: /opt/appts-independent-restore-service/deploy/compose
-    trial_idempotency_key: 9fbb1d1f-6d19-4ee1-9361-50c31560d107
-    intent_contract_ref: "APPTS.CORE.D01.PRETICKET_ADMISSION.SUBMISSION / 1.0.0"
+    appts_db_name: appts_dep001_independent
+    http_proof_src: "{{ playbook_dir }}/../../trial/http-runtime-proof.py"
+    http_proof_dest: /tmp/appts-dt-http-runtime-proof.py
 
   tasks:
-    - name: Read Work Queue before governed HTTP interaction
+    - name: Require healthy runtime before HTTP proof
       ansible.builtin.uri:
-        url: http://127.0.0.1:8080/api/v1/ui/work-queue
+        url: http://127.0.0.1:8080/readyz
         method: GET
         status_code: 200
         return_content: true
-      register: work_before
+      register: ready_before
 
-    - name: Read Intake before governed HTTP interaction
-      ansible.builtin.uri:
-        url: http://127.0.0.1:8080/api/v1/ui/intake
-        method: GET
-        status_code: 200
-        return_content: true
-      register: intake_before
-
-    - name: Require preserved governed TD-PRE-001 browser projection before interaction
-      ansible.builtin.assert:
-        that:
-          - work_before.json.view_id == 'UX-RS-01'
-          - work_before.json.data.ticket_count == 0
-          - intake_before.json.view_id == 'UX-RS-02'
-          - intake_before.json.data.case_count >= 1
-          - intake_before.json.data.cases[0].case_status_ref == 'HOLD_AS_PRE_TICKET'
-          - intake_before.json.data.cases[0].assessment_result == 'NOT_ACCEPTABLE'
-          - intake_before.json.data.cases[0].completeness_result == 'MISSING'
-        fail_msg: "BLOCKED: preserved TD-PRE-001 projection is not the accepted pre-ticket hold state"
-
-    - name: Probe actual API database identity and privilege view through its own connection string
+    - name: Probe API database identity through its own DATABASE_URL
       ansible.builtin.command:
         argv:
           - docker
@@ -56,111 +37,75 @@
             import {createPersistencePool} from '@appts-restore-service/persistence';
             const u=new URL(process.env.DATABASE_URL);
             const p=createPersistencePool({connectionString:process.env.DATABASE_URL});
-            try {
-              const r=await p.query("SELECT current_user AS db_user,current_database() AS db_name,has_table_privilege(current_user,'appts.idempotency_ledger','SELECT') AS idem_select,has_table_privilege(current_user,'appts.idempotency_ledger','INSERT') AS idem_insert,has_table_privilege(current_user,'appts.pre_ticket_case','UPDATE') AS preticket_update");
-              console.log(JSON.stringify({env_user:u.username,env_db:u.pathname.replace(/^\//,''),db:r.rows[0]}));
-            } finally { await p.end(); }
+            try { const r=await p.query('SELECT current_user AS db_user,current_database() AS db_name'); console.log(JSON.stringify({env_user:u.username,env_db:u.pathname.slice(1),db:r.rows[0]})); } finally { await p.end(); }
       args:
         chdir: "{{ appts_compose_dir }}"
-      register: api_db_identity
       changed_when: false
+      register: api_db_identity
 
-    - name: Require API to use accepted runtime role and current owner-flow privileges
+    - name: Require actual appts_runtime execution identity
       ansible.builtin.assert:
         that:
+          - ready_before.json.status == 'ready'
           - "'\"env_user\":\"appts_runtime\"' in api_db_identity.stdout"
           - "'\"env_db\":\"appts_dep001_independent\"' in api_db_identity.stdout"
           - "'\"db_user\":\"appts_runtime\"' in api_db_identity.stdout"
-          - "'\"idem_select\":true' in api_db_identity.stdout"
-          - "'\"idem_insert\":true' in api_db_identity.stdout"
-          - "'\"preticket_update\":true' in api_db_identity.stdout"
-        fail_msg: "BLOCKED: API runtime database identity/privilege view does not match accepted appts_runtime binding"
+        fail_msg: "BLOCKED: HTTP proof would not execute through actual appts_runtime"
 
-    - name: Report safe API database identity evidence
-      ansible.builtin.debug:
-        var: api_db_identity.stdout
+    - name: Transfer bounded HTTP concurrency proof harness
+      ansible.builtin.copy:
+        src: "{{ http_proof_src }}"
+        dest: "{{ http_proof_dest }}"
+        owner: root
+        group: root
+        mode: "0500"
 
-    - name: Generate mechanical HTTP message identity
-      ansible.builtin.command: python3.9 -c "import uuid; print(uuid.uuid4())"
-      register: http_message_id
-      changed_when: false
+    - name: Execute fresh sequential and concurrent governed HTTP proof
+      ansible.builtin.command:
+        argv: [python3.9, "{{ http_proof_dest }}"]
+      register: http_proof
+      changed_when: true
 
-    - name: Generate mechanical HTTP correlation identity
-      ansible.builtin.command: python3.9 -c "import uuid; print(uuid.uuid4())"
-      register: http_correlation_id
-      changed_when: false
+    - name: Parse HTTP proof result
+      ansible.builtin.set_fact:
+        http_proof_json: "{{ http_proof.stdout | from_json }}"
 
-    - name: Execute identical governed TD-PRE-001 through admitted HTTP intent path
-      ansible.builtin.uri:
-        url: http://127.0.0.1:8080/api/v1/ui/intents
-        method: POST
-        body_format: json
-        body:
-          intent_contract_ref: "{{ intent_contract_ref }}"
-          payload:
-            messageId: "{{ http_message_id.stdout }}"
-            idempotencyKey: "{{ trial_idempotency_key }}"
-            correlationId: "{{ http_correlation_id.stdout }}"
-        status_code: 200
-        return_content: true
-      register: http_replay
-
-    - name: Require HTTP idempotent replay and same preserved case identity
+    - name: Require fresh CREATED, replay, conflict, and concurrency behavior
       ansible.builtin.assert:
         that:
-          - http_replay.json.disposition == 'IDEMPOTENT_REPLAY'
-          - http_replay.json.caseId == intake_before.json.data.cases[0].case_id
-        fail_msg: "BLOCKED: admitted HTTP intent path did not preserve TD-PRE-001 idempotency"
+          - http_proof_json.before.work.view_id == 'UX-RS-01'
+          - http_proof_json.before.work.data.ticket_count == 0
+          - http_proof_json.before.intake.view_id == 'UX-RS-02'
+          - http_proof_json.sequential.created.disposition == 'CREATED'
+          - http_proof_json.sequential.created.assessmentResult == 'NOT_ACCEPTABLE'
+          - http_proof_json.sequential.created.decision == 'HOLD_AS_PRE_TICKET'
+          - http_proof_json.sequential.replay.disposition == 'IDEMPOTENT_REPLAY'
+          - http_proof_json.sequential.replay.caseId == http_proof_json.sequential.created.caseId
+          - http_proof_json.sequential.conflict.disposition == 'CONFLICT_HOLD'
+          - http_proof_json.identical_concurrency.created_count == 1
+          - http_proof_json.identical_concurrency.replay_count == 7
+          - http_proof_json.identical_concurrency.conflict_count == 0
+          - (http_proof_json.identical_concurrency.case_ids | length) == 1
+          - http_proof_json.identical_concurrency.created.disposition == 'CREATED'
+          - http_proof_json.identical_concurrency.created.assessmentResult == 'NOT_ACCEPTABLE'
+          - http_proof_json.identical_concurrency.created.decision == 'HOLD_AS_PRE_TICKET'
+          - http_proof_json.identical_concurrency.case_ids[0] == http_proof_json.identical_concurrency.created.caseId
+          - http_proof_json.mixed_concurrency.seed.disposition == 'CREATED'
+          - http_proof_json.mixed_concurrency.seed.assessmentResult == 'NOT_ACCEPTABLE'
+          - http_proof_json.mixed_concurrency.seed.decision == 'HOLD_AS_PRE_TICKET'
+          - http_proof_json.mixed_concurrency.created_count == 0
+          - http_proof_json.mixed_concurrency.replay_count == 4
+          - http_proof_json.mixed_concurrency.conflict_count == 4
+          - http_proof_json.after.work.view_id == 'UX-RS-01'
+          - http_proof_json.after.work.data.ticket_count == 0
+          - http_proof_json.after.intake.view_id == 'UX-RS-02'
+          - http_proof_json.after.intake.data.case_count == (http_proof_json.before.intake.data.case_count + 3)
+          - http_proof_json.sequential.created.caseId in (http_proof_json.after.intake.data.cases | map(attribute='case_id') | list)
+          - http_proof_json.identical_concurrency.created.caseId in (http_proof_json.after.intake.data.cases | map(attribute='case_id') | list)
+          - http_proof_json.mixed_concurrency.seed.caseId in (http_proof_json.after.intake.data.cases | map(attribute='case_id') | list)
+        fail_msg: "BLOCKED: actual appts_runtime HTTP behavior diverged from MCR-to-DT-012"
 
-    - name: Generate mechanical conflict message identity
-      ansible.builtin.command: python3.9 -c "import uuid; print(uuid.uuid4())"
-      register: conflict_message_id
-      changed_when: false
-
-    - name: Generate mechanical conflict correlation identity
-      ansible.builtin.command: python3.9 -c "import uuid; print(uuid.uuid4())"
-      register: conflict_correlation_id
-      changed_when: false
-
-    - name: Execute materially changed same-key HTTP probe
-      ansible.builtin.uri:
-        url: http://127.0.0.1:8080/api/v1/ui/intents
-        method: POST
-        body_format: json
-        body:
-          intent_contract_ref: "{{ intent_contract_ref }}"
-          payload:
-            messageId: "{{ conflict_message_id.stdout }}"
-            idempotencyKey: "{{ trial_idempotency_key }}"
-            correlationId: "{{ conflict_correlation_id.stdout }}"
-            conflictProbe: true
-        status_code: 200
-        return_content: true
-      register: http_conflict
-
-    - name: Require HTTP conflict hold
-      ansible.builtin.assert:
-        that:
-          - http_conflict.json.disposition == 'CONFLICT_HOLD'
-        fail_msg: "BLOCKED: materially changed same-key HTTP intent did not fail closed as CONFLICT_HOLD"
-
-    - name: Read Work Queue after governed HTTP interaction
-      ansible.builtin.uri:
-        url: http://127.0.0.1:8080/api/v1/ui/work-queue
-        method: GET
-        status_code: 200
-        return_content: true
-      register: work_after
-
-    - name: Read Intake after governed HTTP interaction
-      ansible.builtin.uri:
-        url: http://127.0.0.1:8080/api/v1/ui/intake
-        method: GET
-        status_code: 200
-        return_content: true
-      register: intake_after
-
-    - name: Capture zero-Ticket and pre-ticket readback
+    - name: Read back exact durable persistence using independent read-only observer
       ansible.builtin.command:
         argv:
           - docker
@@ -177,43 +122,77 @@
           - -U
           - appts_admin
           - -d
-          - appts_dep001_independent
+          - "{{ appts_db_name }}"
           - -Atqc
           - >-
+            WITH expected(case_id,idem_key) AS (VALUES
+              ('{{ http_proof_json.sequential.created.caseId }}'::uuid,'{{ http_proof_json.keys.sequential }}'),
+              ('{{ http_proof_json.identical_concurrency.created.caseId }}'::uuid,'{{ http_proof_json.keys.identical }}'),
+              ('{{ http_proof_json.mixed_concurrency.seed.caseId }}'::uuid,'{{ http_proof_json.keys.mixed }}'))
+            SELECT 'case_count=' || count(*) FROM appts.pre_ticket_case p JOIN expected e ON e.case_id=p.case_id;
+            WITH expected(case_id) AS (VALUES
+              ('{{ http_proof_json.sequential.created.caseId }}'::uuid),
+              ('{{ http_proof_json.identical_concurrency.created.caseId }}'::uuid),
+              ('{{ http_proof_json.mixed_concurrency.seed.caseId }}'::uuid))
+            SELECT 'hold_count=' || count(*) FROM appts.pre_ticket_case p JOIN expected e ON e.case_id=p.case_id WHERE p.case_status_ref='HOLD_AS_PRE_TICKET' AND p.projection_version=2;
+            WITH expected(case_id) AS (VALUES
+              ('{{ http_proof_json.sequential.created.caseId }}'::uuid),
+              ('{{ http_proof_json.identical_concurrency.created.caseId }}'::uuid),
+              ('{{ http_proof_json.mixed_concurrency.seed.caseId }}'::uuid))
+            SELECT 'observation_count=' || count(*) FROM appts.source_observation o JOIN appts.pre_ticket_case p ON p.governing_observation_ref=o.observation_id JOIN expected e ON e.case_id=p.case_id;
+            WITH expected(case_id) AS (VALUES
+              ('{{ http_proof_json.sequential.created.caseId }}'::uuid),
+              ('{{ http_proof_json.identical_concurrency.created.caseId }}'::uuid),
+              ('{{ http_proof_json.mixed_concurrency.seed.caseId }}'::uuid))
+            SELECT 'cue_count=' || count(*) FROM appts.intake_cue c JOIN appts.source_observation o ON o.cue_id=c.cue_id JOIN appts.pre_ticket_case p ON p.governing_observation_ref=o.observation_id JOIN expected e ON e.case_id=p.case_id;
+            WITH expected(case_id,idem_key) AS (VALUES
+              ('{{ http_proof_json.sequential.created.caseId }}'::uuid,'{{ http_proof_json.keys.sequential }}'),
+              ('{{ http_proof_json.identical_concurrency.created.caseId }}'::uuid,'{{ http_proof_json.keys.identical }}'),
+              ('{{ http_proof_json.mixed_concurrency.seed.caseId }}'::uuid,'{{ http_proof_json.keys.mixed }}'))
+            SELECT 'ledger_map_count=' || count(*) FROM appts.idempotency_ledger l JOIN expected e ON e.idem_key=l.idempotency_key AND e.case_id=l.durable_result_ref WHERE l.owner_domain_ref='APPTS.CORE.D01.PRETICKET_ADMISSION.OWNER';
+            WITH expected(case_id) AS (VALUES
+              ('{{ http_proof_json.sequential.created.caseId }}'::uuid),
+              ('{{ http_proof_json.identical_concurrency.created.caseId }}'::uuid),
+              ('{{ http_proof_json.mixed_concurrency.seed.caseId }}'::uuid))
+            SELECT 'assessment_count=' || count(*) FROM appts.admission_assessment a JOIN expected e ON e.case_id=a.case_id WHERE a.overall_result_ref='NOT_ACCEPTABLE';
+            WITH expected(case_id) AS (VALUES
+              ('{{ http_proof_json.sequential.created.caseId }}'::uuid),
+              ('{{ http_proof_json.identical_concurrency.created.caseId }}'::uuid),
+              ('{{ http_proof_json.mixed_concurrency.seed.caseId }}'::uuid))
+            SELECT 'decision_count=' || count(*) FROM appts.intake_decision d JOIN expected e ON e.case_id=d.case_id WHERE d.decision_code='HOLD_AS_PRE_TICKET';
             SELECT 'ticket_identity=' || count(*) FROM appts.ticket_identity;
             SELECT 'ticket_formation=' || count(*) FROM appts.ticket_formation_record;
             SELECT 'runtime_ticket=' || count(*) FROM appts.runtime_ticket;
-            SELECT 'pre_ticket_case=' || count(*) FROM appts.pre_ticket_case;
       args:
         chdir: "{{ appts_compose_dir }}"
-      register: db_readback
       changed_when: false
+      register: persistence_readback
 
-    - name: Require preserved hold projection and zero downstream Ticket after HTTP interaction
+    - name: Require one durable governed outcome per fresh key and zero Ticket manufacture
       ansible.builtin.assert:
         that:
-          - work_after.json.view_id == 'UX-RS-01'
-          - work_after.json.data.ticket_count == 0
-          - intake_after.json.view_id == 'UX-RS-02'
-          - intake_after.json.data.case_count == intake_before.json.data.case_count
-          - intake_after.json.data.cases[0].case_id == intake_before.json.data.cases[0].case_id
-          - intake_after.json.data.cases[0].case_status_ref == 'HOLD_AS_PRE_TICKET'
-          - intake_after.json.data.cases[0].assessment_result == 'NOT_ACCEPTABLE'
-          - intake_after.json.data.cases[0].completeness_result == 'MISSING'
-          - "'ticket_identity=0' in db_readback.stdout_lines"
-          - "'ticket_formation=0' in db_readback.stdout_lines"
-          - "'runtime_ticket=0' in db_readback.stdout_lines"
-          - "'pre_ticket_case=1' in db_readback.stdout_lines"
-        fail_msg: "BLOCKED: HTTP interaction changed accepted pre-ticket/Ticket boundaries"
+          - "'case_count=3' in persistence_readback.stdout_lines"
+          - "'hold_count=3' in persistence_readback.stdout_lines"
+          - "'observation_count=3' in persistence_readback.stdout_lines"
+          - "'cue_count=3' in persistence_readback.stdout_lines"
+          - "'ledger_map_count=3' in persistence_readback.stdout_lines"
+          - "'assessment_count=3' in persistence_readback.stdout_lines"
+          - "'decision_count=3' in persistence_readback.stdout_lines"
+          - "'ticket_identity=0' in persistence_readback.stdout_lines"
+          - "'ticket_formation=0' in persistence_readback.stdout_lines"
+          - "'runtime_ticket=0' in persistence_readback.stdout_lines"
+        fail_msg: "BLOCKED: durable readback or zero-Ticket boundary diverged after runtime HTTP proof"
 
-    - name: Report safe HTTP Trial evidence
+    - name: Report safe Stage 3.2 runtime HTTP evidence
       ansible.builtin.debug:
         msg:
           - "api_db_identity={{ api_db_identity.stdout }}"
-          - "work_before={{ work_before.json }}"
-          - "intake_before={{ intake_before.json }}"
-          - "http_replay={{ http_replay.json }}"
-          - "http_conflict={{ http_conflict.json }}"
-          - "work_after={{ work_after.json }}"
-          - "intake_after={{ intake_after.json }}"
-          - "db_readback={{ db_readback.stdout_lines }}"
+          - "sequential={{ http_proof_json.sequential }}"
+          - "identical_concurrency={{ http_proof_json.identical_concurrency }}"
+          - "mixed_concurrency={{ http_proof_json.mixed_concurrency }}"
+          - "work_before={{ http_proof_json.before.work }}"
+          - "intake_before={{ http_proof_json.before.intake }}"
+          - "work_after={{ http_proof_json.after.work }}"
+          - "intake_after={{ http_proof_json.after.intake }}"
+          - "persistence_readback={{ persistence_readback.stdout_lines }}"
+          - "All mutating Trial requests used POST /api/v1/ui/intents through the running API bound to appts_runtime; appts_admin was used only for read-only postcondition observation."
