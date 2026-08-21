@@ -1,23 +1,50 @@
 ---
-- name: Start existing independent RESTORE_SERVICE non-production stack without rebuild
+- name: Verify and rebuild current independent RESTORE_SERVICE non-production stack
   hosts: independent
   become: true
   gather_facts: false
   vars:
+    appts_install_dir: /opt/appts-independent-restore-service
     appts_compose_dir: /opt/appts-independent-restore-service/deploy/compose
+    appts_db_secret_file: /etc/appts-independent/db-secrets.json
+    appts_db_tools_image: appts-independent-db-tools:experimental
+    appts_db_name: appts_dep001_independent
+    appts_migration_role: appts_migration
   tasks:
     - name: Require existing Compose environment
       ansible.builtin.stat:
         path: "{{ appts_compose_dir }}/.env"
       register: compose_env
 
-    - name: Refuse start if existing deployment material is absent
+    - name: Refuse continuation if existing deployment material is absent
       ansible.builtin.assert:
         that:
           - compose_env.stat.exists
         fail_msg: "BLOCKED: existing isolated DT deployment material is absent"
 
-    - name: Start existing installed Compose stack without build or reset
+    - name: Require persisted experimental DB secret material
+      ansible.builtin.stat:
+        path: "{{ appts_db_secret_file }}"
+      register: db_secret_file_state
+
+    - name: Refuse continuation if migration credential binding is absent
+      ansible.builtin.assert:
+        that:
+          - db_secret_file_state.stat.exists
+        fail_msg: "BLOCKED: accepted DT migration credential binding is absent"
+
+    - name: Read persisted experimental DB secrets
+      ansible.builtin.slurp:
+        src: "{{ appts_db_secret_file }}"
+      register: db_secret_file_raw
+      no_log: true
+
+    - name: Bind existing migration credential for verifier only
+      ansible.builtin.set_fact:
+        appts_migration_password: "{{ (db_secret_file_raw.content | b64decode | from_json).migration_password }}"
+      no_log: true
+
+    - name: Ensure PostgreSQL service is running without reset
       ansible.builtin.command:
         argv:
           - docker
@@ -28,11 +55,127 @@
           - .env
           - up
           - -d
+          - postgres
       args:
         chdir: "{{ appts_compose_dir }}"
       changed_when: true
 
-    - name: Wait for existing loopback health endpoint
+    - name: Locate current DEP internal DB network
+      ansible.builtin.command:
+        argv:
+          - docker
+          - network
+          - ls
+          - --filter
+          - label=com.docker.compose.project=appts-restore-service-dep001
+          - --filter
+          - label=com.docker.compose.network=dep-db-internal
+          - -q
+      register: db_network
+      changed_when: false
+
+    - name: Require one deterministic internal DB network
+      ansible.builtin.assert:
+        that:
+          - (db_network.stdout_lines | length) == 1
+        fail_msg: "BLOCKED: deterministic DEP internal DB network not found"
+
+    - name: Rebuild DB tools image from current installed verifier source
+      ansible.builtin.command:
+        argv:
+          - docker
+          - buildx
+          - build
+          - --load
+          - --platform
+          - linux/amd64
+          - -f
+          - deploy/db/Dockerfile.tools
+          - --build-context
+          - dep_db=deploy/db
+          - --build-context
+          - dep_migrations=db/migrations
+          - --build-context
+          - dep_verify=db/verify
+          - --build-context
+          - dep_fixtures=db/fixtures
+          - --build-context
+          - dep_tools=tools
+          - -t
+          - "{{ appts_db_tools_image }}"
+          - .
+      args:
+        chdir: "{{ appts_install_dir }}"
+      changed_when: true
+
+    - name: Run current read-only DEP-001 schema verifiers with accepted UTC binding
+      ansible.builtin.command:
+        argv:
+          - docker
+          - run
+          - --rm
+          - --network
+          - "{{ db_network.stdout }}"
+          - -e
+          - PGHOST
+          - -e
+          - PGPORT
+          - -e
+          - PGDATABASE
+          - -e
+          - PGUSER
+          - -e
+          - PGPASSWORD
+          - -e
+          - PGTZ
+          - "{{ appts_db_tools_image }}"
+          - sh
+          - -c
+          - >-
+            psql -X -v ON_ERROR_STOP=1 --file=/workspace/db/verify/001_cf01_constraints.sql &&
+            psql -X -v ON_ERROR_STOP=1 --file=/workspace/db/verify/002_cf01_history_inbox_outbox.sql &&
+            psql -X -v ON_ERROR_STOP=1 --file=/workspace/db/verify/003_dg04_diagnostics.sql
+      environment:
+        PGHOST: postgres
+        PGPORT: "5432"
+        PGDATABASE: "{{ appts_db_name }}"
+        PGUSER: "{{ appts_migration_role }}"
+        PGPASSWORD: "{{ appts_migration_password }}"
+        PGTZ: UTC
+      register: verifier_result
+      changed_when: false
+      failed_when: false
+
+    - name: Report verifier result without credential values
+      ansible.builtin.debug:
+        msg:
+          - "verifier_rc={{ verifier_result.rc }}"
+          - "verifier_stdout={{ verifier_result.stdout_lines }}"
+          - "verifier_stderr={{ verifier_result.stderr_lines }}"
+
+    - name: Require current verifier PASS before application rebuild
+      ansible.builtin.assert:
+        that:
+          - verifier_result.rc == 0
+        fail_msg: "BLOCKED: current installed verifier source did not pass against preserved V001-V004 state"
+
+    - name: Rebuild and start current installed Compose stack without DB reset
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - up
+          - -d
+          - --build
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      changed_when: true
+
+    - name: Wait for loopback health endpoint
       ansible.builtin.uri:
         url: http://127.0.0.1:8080/healthz
         method: GET
@@ -43,7 +186,7 @@
       delay: 5
       until: healthz.status == 200
 
-    - name: Verify existing loopback readiness endpoint
+    - name: Verify loopback readiness endpoint
       ansible.builtin.uri:
         url: http://127.0.0.1:8080/readyz
         method: GET
@@ -51,9 +194,10 @@
         return_content: true
       register: readyz
 
-    - name: Report safe start evidence
+    - name: Report bounded continuation evidence
       ansible.builtin.debug:
         msg:
           - "healthz={{ healthz.content }}"
           - "readyz={{ readyz.content }}"
-          - "Existing installed stack started without rebuild, source replacement, or DB reset."
+          - "Current verifier image rebuilt from installed source; verifier PASS required before runtime rebuild."
+          - "Compose rebuilt without migration, schema change, source substitution, or DB reset."
