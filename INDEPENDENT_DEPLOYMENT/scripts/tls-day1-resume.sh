@@ -53,23 +53,29 @@ TICKET_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ti
 echo "resume_ticket_id=${TICKET_ID}" | tee "$EVIDENCE_DIR/resume-ticket.txt"
 
 # Read only: detect whether the interrupted POST already durably wrote its
-# action_intent before the deeper effect failed. No DB mutation occurs here.
+# action_intent before the deeper effect failed. chr(31) is used as an
+# unambiguous field separator so the remote shell needs no JSON string literal.
 "${SSH_BASE[@]}" "${INDEP_USER}@${INDEP_HOST}" \
-  "sudo sh -lc 'cd /opt/appts-independent-restore-service/deploy/compose && docker compose -f compose.yaml --env-file .env exec -T postgres psql -X -U appts_admin -d appts_dep001_independent -Atqc \"SELECT COALESCE(json_agg(row_to_json(x)),''''[]''''::json)::text FROM (SELECT action_intent_id::text,ticket_id::text,actor_ref::text,role_assignment_ref::text,requested_action_class,presented_source_version_ref,expected_aggregate_version,to_char(intent_time AT TIME ZONE ''''UTC'''',''''YYYY-MM-DD\\\"T\\\"HH24:MI:SS.MS\\\"Z\\\"'''') AS intent_time FROM appts.action_intent WHERE ticket_id=''''${TICKET_ID}'''' ORDER BY intent_time,action_intent_id) x;\"'" \
-  | tee "$EVIDENCE_DIR/stored-action-intents.json"
+  "sudo sh -lc 'cd /opt/appts-independent-restore-service/deploy/compose && docker compose -f compose.yaml --env-file .env exec -T postgres psql -X -U appts_admin -d appts_dep001_independent -Atqc \"SELECT concat_ws(chr(31),action_intent_id::text,ticket_id::text,actor_ref::text,role_assignment_ref::text,requested_action_class,presented_source_version_ref::text,expected_aggregate_version::text,intent_time::text) FROM appts.action_intent WHERE ticket_id=''''${TICKET_ID}'''' ORDER BY intent_time,action_intent_id;\"'" \
+  | tee "$EVIDENCE_DIR/stored-action-intents.txt"
 
 # Resume the exact presented UI/API path. If a single interrupted action_intent
 # exists, reuse its exact identity and stored fields. Otherwise create one fresh
 # intent from the current Ticket Console. Any HTTP failure body is captured
 # verbatim before stopping.
-python3 - "$PORT" "$EVIDENCE_DIR/current-before.json" "$EVIDENCE_DIR/stored-action-intents.json" "$EVIDENCE_DIR/action-result.json" "$EVIDENCE_DIR/action-http-error.json" <<'PY'
+python3 - "$PORT" "$EVIDENCE_DIR/current-before.json" "$EVIDENCE_DIR/stored-action-intents.txt" "$EVIDENCE_DIR/action-result.json" "$EVIDENCE_DIR/action-http-error.json" <<'PY'
 import datetime, json, sys, uuid, urllib.error, urllib.request
 port, before_path, stored_path, out, errout = sys.argv[1:]
 base=f"http://127.0.0.1:{port}/api/v1/ui"
 before=json.load(open(before_path))
 console=before['console']; d=console['data']; ticket=before['ticketId']
-stored=json.load(open(stored_path))
-assert isinstance(stored,list) and len(stored)<=1, stored
+lines=[x.rstrip('\n') for x in open(stored_path,encoding='utf-8') if x.rstrip('\n')]
+assert len(lines)<=1, lines
+stored=[]
+if lines:
+    parts=lines[0].split(chr(31))
+    assert len(parts)==8, parts
+    stored=[dict(zip(('action_intent_id','ticket_id','actor_ref','role_assignment_ref','requested_action_class','presented_source_version_ref','expected_aggregate_version','intent_time'),parts))]
 
 def read(path):
     with urllib.request.urlopen(base+path,timeout=30) as r:
