@@ -87,7 +87,7 @@ jobs:
         run: |
           set -euo pipefail
           cd DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
-          node apps/api/dist/dep-bootstrap.js >/tmp/codex051-api.log 2>&1 & pid=$!
+          node apps/api/dist/dep-bootstrap.js >/tmp/codex051-baseline-api.log 2>&1 & pid=$!
           trap 'kill $pid 2>/dev/null || true' EXIT
           for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/readyz >/dev/null && break || sleep 1; done
           curl -fsS http://127.0.0.1:8080/api/v1/ui/work-queue
@@ -133,3 +133,82 @@ jobs:
           npm run typecheck
           npm run build
           echo "CANDIDATE_COMPILE=PASS"
+      - name: Execute positive Golden Path with actual appts_runtime
+        shell: bash
+        env:
+          DATABASE_URL: postgresql://appts_runtime:codex051-runtime-local-only@127.0.0.1:5432/appts_dep001_codex051
+          API_LISTEN_PORT: 8080
+          APPTS_TRIAL_DISCLOSURE_LABEL_REF: 6f79da70-412f-469e-bcf7-f544f81b8aa7
+        run: |
+          set -euo pipefail
+          root=DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+          cd "$root"
+
+          # Static Trial configuration belongs to migration/deployment identity.
+          set +e
+          PGPASSWORD=codex051-runtime-local-only psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U appts_runtime -d appts_dep001_codex051 < deploy/db/seed-tls-day1-golden.sql >/tmp/runtime-seed.out 2>/tmp/runtime-seed.err
+          runtime_seed_rc=$?
+          set -e
+          test "$runtime_seed_rc" -ne 0
+          grep -q 'static Trial binding seed must not run as appts_runtime' /tmp/runtime-seed.err
+          PGPASSWORD=codex051-migration-local-only psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U appts_migration -d appts_dep001_codex051 < deploy/db/seed-tls-day1-golden.sql
+
+          node apps/api/dist/dep-bootstrap.js >/tmp/codex051-candidate-api.log 2>&1 & pid=$!
+          trap 'kill $pid 2>/dev/null || true; cat /tmp/codex051-candidate-api.log || true' EXIT
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/readyz >/dev/null && break || sleep 1; done
+          curl -fsS http://127.0.0.1:8080/healthz | tee /tmp/health.json
+          curl -fsS http://127.0.0.1:8080/readyz | tee /tmp/ready.json
+
+          positive='{"intent_contract_ref":"APPTS.CORE.D01.PRETICKET_ADMISSION.SUBMISSION / 1.0.0","payload":{"messageId":"51030000-0000-4000-8000-000000000001","idempotencyKey":"51030000-0000-4000-8000-000000000002","correlationId":"51030000-0000-4000-8000-000000000003","trialContext":"TLS-DAY1-GOLDEN"}}'
+          curl -fsS -H 'content-type: application/json' -d "$positive" http://127.0.0.1:8080/api/v1/ui/intents | tee /tmp/positive.json
+          ticket=$(node -e "const x=require('/tmp/positive.json');if(x.disposition!=='CREATED'||x.assessmentResult!=='ACCEPTABLE'||x.decision!=='ACCEPTED_FOR_FORMATION'||x.state!=='ACCEPTED'||x.aggregateVersion!==0)process.exit(2);process.stdout.write(x.ticketId)")
+          test -n "$ticket"
+          echo "positive_ticket=$ticket"
+
+          # Same-key replay must remain the same durable Ticket.
+          curl -fsS -H 'content-type: application/json' -d "$positive" http://127.0.0.1:8080/api/v1/ui/intents | tee /tmp/replay.json
+          TICKET="$ticket" node -e "const x=require('/tmp/replay.json');if(x.disposition!=='IDEMPOTENT_REPLAY'||x.ticketId!==process.env.TICKET)process.exit(2)"
+          changed='{"intent_contract_ref":"APPTS.CORE.D01.PRETICKET_ADMISSION.SUBMISSION / 1.0.0","payload":{"messageId":"51030000-0000-4000-8000-000000000009","idempotencyKey":"51030000-0000-4000-8000-000000000002","correlationId":"51030000-0000-4000-8000-000000000003","trialContext":"TLS-DAY1-GOLDEN"}}'
+          curl -fsS -H 'content-type: application/json' -d "$changed" http://127.0.0.1:8080/api/v1/ui/intents | tee /tmp/conflict.json
+          TICKET="$ticket" node -e "const x=require('/tmp/conflict.json');if(x.disposition!=='CONFLICT_HOLD'||x.ticketId!==process.env.TICKET)process.exit(2)"
+
+          curl -fsS http://127.0.0.1:8080/api/v1/ui/work-queue | tee /tmp/work.json
+          TICKET="$ticket" node -e "const x=require('/tmp/work.json');if(x.view_id!=='UX-RS-01'||!Array.isArray(x.data?.tickets)||!x.data.tickets.some(t=>t.ticket_id===process.env.TICKET&&t.current_state_code==='ACCEPTED'))process.exit(2)"
+          curl -fsS "http://127.0.0.1:8080/api/v1/ui/tickets/$ticket" | tee /tmp/ticket-before.json
+          TICKET="$ticket" node -e "const x=require('/tmp/ticket-before.json');const d=x.data;if(x.view_id!=='UX-RS-03'||x.subject_ref!==process.env.TICKET||d.current_state_code!=='ACCEPTED'||d.aggregate_version!==0||d.holder_ref!=='51010000-0000-4000-8000-00000000000a'||d.role_assignment_ref!=='51010000-0000-4000-8000-00000000000b'||d.authority_currentness_ref!=='CURRENT'||d.gate_currentness_ref!=='CURRENT'||JSON.stringify(d.available_actions)!=='[\"ACTIVATE\"]')process.exit(2)"
+          source_version=$(node -e "const x=require('/tmp/ticket-before.json');process.stdout.write(x.source_version_set_ref)")
+          intent_time=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+          action_id=51040000-0000-4000-8000-000000000001
+          node - "$ticket" "$source_version" "$intent_time" "$action_id" > /tmp/action.json <<'NODE'
+          const [ticket, sourceVersion, intentTime, actionId] = process.argv.slice(2);
+          process.stdout.write(JSON.stringify({
+            intent_contract_ref: "INT-RUN-TD-05",
+            payload: {
+              action_intent_id: actionId,
+              ticket_id: ticket,
+              actor_ref: "51010000-0000-4000-8000-00000000000a",
+              role_assignment_ref: "51010000-0000-4000-8000-00000000000b",
+              requested_action_class: "ACTIVATE",
+              presented_source_version_ref: sourceVersion,
+              expected_aggregate_version: 0,
+              intent_time: intentTime
+            }
+          }));
+          NODE
+          curl -fsS -H 'content-type: application/json' --data-binary @/tmp/action.json http://127.0.0.1:8080/api/v1/ui/intents | tee /tmp/action-result.json
+          node -e "const x=require('/tmp/action-result.json');if(x.result!=='EFFECT_APPLIED'||x.durable!==true||x.state!=='ACTIVE'||x.aggregateVersion!==1)process.exit(2)"
+
+          curl -fsS "http://127.0.0.1:8080/api/v1/ui/tickets/$ticket" | tee /tmp/ticket-after.json
+          node -e "const x=require('/tmp/ticket-after.json');const d=x.data;if(d.current_state_code!=='ACTIVE'||d.aggregate_version!==1||!Array.isArray(d.available_actions)||d.available_actions.length!==0||d.restriction_profile_ref!=='POST_ACTIVATION_REFRESH_REQUIRED')process.exit(2)"
+
+          # Replaying the exact action command returns the durable effect; no second transition.
+          curl -fsS -H 'content-type: application/json' --data-binary @/tmp/action.json http://127.0.0.1:8080/api/v1/ui/intents | tee /tmp/action-replay.json
+          node -e "const x=require('/tmp/action-replay.json');if(x.result!=='EFFECT_APPLIED'||x.state!=='ACTIVE'||x.aggregateVersion!==1)process.exit(2)"
+
+          export PGPASSWORD=codex051-migration-local-only
+          counts=$(psql -X -At -F '|' -h 127.0.0.1 -U appts_migration -d appts_dep001_codex051 -c "SELECT (SELECT count(*) FROM appts.ticket_identity),(SELECT count(*) FROM appts.ticket_formation_record),(SELECT count(*) FROM appts.runtime_ticket WHERE current_state_code='ACTIVE' AND aggregate_version=1),(SELECT count(*) FROM appts.action_intent),(SELECT count(*) FROM appts.lifecycle_effect_request),(SELECT count(*) FROM appts.lifecycle_effect_result),(SELECT count(*) FROM appts.runtime_state_transition),(SELECT count(*) FROM appts.intake_decision WHERE decision_code='ACCEPTED_FOR_FORMATION');")
+          echo "day1_counts=$counts"
+          test "$counts" = '1|1|1|1|1|1|1|1'
+          current_user=$(PGPASSWORD=codex051-runtime-local-only psql -X -At -h 127.0.0.1 -U appts_runtime -d appts_dep001_codex051 -c 'select current_user')
+          test "$current_user" = appts_runtime
+          echo 'TLS_DAY1_RUNTIME_GATE=PASS'
