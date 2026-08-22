@@ -165,7 +165,6 @@ function submission(request: GoldenRequest, at: string): PreTicketSubmission {
 }
 
 function activationMessage(formation: ReturnType<typeof formTicket>, request: GoldenRequest, at: string): TicketActivationMessage {
-  const payloadHash = hash(JSON.stringify(formation.activation));
   return Object.freeze({
     interface_identity: I01_INTERFACE_IDENTITY,
     semantic_version: I01_SEMANTIC_VERSION,
@@ -179,7 +178,7 @@ function activationMessage(formation: ReturnType<typeof formTicket>, request: Go
     produced_at: at,
     effective_from: at,
     currentness_ref: "CURRENT",
-    payload_hash: payloadHash,
+    payload_hash: hash(JSON.stringify(formation.activation)),
     payload: formation.activation,
   });
 }
@@ -196,18 +195,16 @@ async function createGolden(pool: PersistencePool, payload: unknown): Promise<Go
     if (prior.rowCount) {
       const row = prior.rows[0]!;
       if (!row.durable_result_ref) throw new Error("TLS_DAY1_LEDGER_RESULT_MISSING");
-      if (row.payload_hash !== payloadHash) return { disposition: "CONFLICT_HOLD", ticketId: row.durable_result_ref };
-      return { disposition: "IDEMPOTENT_REPLAY", ticketId: row.durable_result_ref };
+      return row.payload_hash === payloadHash
+        ? { disposition: "IDEMPOTENT_REPLAY", ticketId: row.durable_result_ref }
+        : { disposition: "CONFLICT_HOLD", ticketId: row.durable_result_ref };
     }
 
     const at = now();
     const sourceSubmission = submission(request, at);
     const ids = {
-      intakeCueId: randomUUID(),
-      observationId: randomUUID(),
-      preTicketCaseId: randomUUID(),
-      assessmentId: randomUUID(),
-      decisionId: randomUUID(),
+      intakeCueId: randomUUID(), observationId: randomUUID(), preTicketCaseId: randomUUID(),
+      assessmentId: randomUUID(), decisionId: randomUUID(),
     };
     const evaluation = evaluatePreTicketAdmission(sourceSubmission, ids, predicates());
     if (evaluation.assessment.result !== "ACCEPTABLE" || evaluation.decision !== "ACCEPTED_FOR_FORMATION") {
@@ -251,21 +248,15 @@ async function createGolden(pool: PersistencePool, payload: unknown): Promise<Go
     const evidenceSetId = randomUUID();
     const formationMarker = randomUUID();
     const formation = formTicket(evaluation.assessment, {
-      formationId,
-      ticketId,
-      domainId: DOMAIN,
-      intakeDecisionId: ids.decisionId,
-      responsibleAssignmentRef: responsibilityId,
-      formationEvidenceSetRef: evidenceSetId,
-      aggregateVersion: 0,
-      effectiveAt: at,
-      binding: PURPOSE,
+      formationId, ticketId, domainId: DOMAIN, intakeDecisionId: ids.decisionId,
+      responsibleAssignmentRef: responsibilityId, formationEvidenceSetRef: evidenceSetId,
+      aggregateVersion: 0, effectiveAt: at, binding: PURPOSE,
     });
     const i01 = activationMessage(formation, request, at);
     const activation = activateRuntime(undefined, i01, validateTicketActivation(i01));
-    if (activation.status !== "ACTIVATED") throw new Error(`TLS_DAY1_I01_ACTIVATION_${activation.status}`);
-    const runtime = activation.aggregate;
-    if (runtime.state !== "ACCEPTED" || runtime.aggregateVersion !== 0) throw new Error("TLS_DAY1_I01_ACTIVATION_POSTCONDITION_FAILED");
+    if (activation.status !== "ACTIVATED" || activation.aggregate.state !== "ACCEPTED" || activation.aggregate.aggregateVersion !== 0) {
+      throw new Error("TLS_DAY1_I01_ACTIVATION_POSTCONDITION_FAILED");
+    }
 
     await client.query("SET CONSTRAINTS ALL DEFERRED");
     await client.query(
@@ -289,8 +280,8 @@ async function createGolden(pool: PersistencePool, payload: unknown): Promise<Go
       [DOMAIN, SOURCE_REF, SOURCE_VERSION_REF, at, HOLDER, AUTHORIZATION_BASIS, QUALIFICATION_REF, DISCLOSURE, request.correlationId, formationId, ticketId, ids.decisionId, PURPOSE_BINDING, responsibilityId, evidenceSetId, request.idempotencyKey, formationMarker],
     );
 
-    // TLS Day-1 fixture supplies current Role/authority/Gate source facts only.
-    // D-04 remains the accepted action-set and lifecycle-effect decision owner.
+    // Controlled Trial source facts bind one existing accepted action class.
+    // D-04 remains the action-set and lifecycle-effect owner.
     const authorityId = randomUUID();
     const gateId = randomUUID();
     const progressionId = randomUUID();
@@ -310,30 +301,18 @@ async function createGolden(pool: PersistencePool, payload: unknown): Promise<Go
     await client.query("INSERT INTO appts.progression_class(envelope_id,progression_class_ref) VALUES($1,'ACTIVATE')", [progressionId]);
 
     const authorityPayload: AuthorityResolutionPayload = Object.freeze({
-      authority_result_id: authorityId,
-      ticket_id: ticketId,
-      domain_id: DOMAIN,
-      context_ref: { trial: TLS_DAY1_GOLDEN_CONTEXT },
-      assignment_snapshot_refs: [ASSIGNMENT_SNAPSHOT],
-      responsibility_id: responsibilityId,
-      responsible_assignment_ref: ASSIGNMENT_REF,
+      authority_result_id: authorityId, ticket_id: ticketId, domain_id: DOMAIN,
+      context_ref: { trial: TLS_DAY1_GOLDEN_CONTEXT }, assignment_snapshot_refs: [ASSIGNMENT_SNAPSHOT],
+      responsibility_id: responsibilityId, responsible_assignment_ref: ASSIGNMENT_REF,
       authority_actions: [{ action_class_ref: "ACTIVATE", permission_code: "ALLOW" }],
-      result_status_ref: "AUTHORIZED",
-      currentness_ref: "CURRENT",
-      effective_from: at,
+      result_status_ref: "AUTHORIZED", currentness_ref: "CURRENT", effective_from: at,
     });
     const gatePayload: EvidenceGateResultPayload = Object.freeze({
-      gate_result_id: gateId,
-      ticket_id: ticketId,
-      gate_identity: "TLS_DAY1_INITIAL_ACTIVATION",
-      gate_evaluation_id: gateId,
-      input_version_set_ref: { aggregate_version: 0 },
-      evidence_set_version_id: evidenceSetId,
-      gate_predicate_results: [],
-      progression_envelope_id: progressionId,
-      permitted_progression_classes: ["ACTIVATE"],
-      currentness_ref: "CURRENT",
-      effective_from: at,
+      gate_result_id: gateId, ticket_id: ticketId, gate_identity: "TLS_DAY1_INITIAL_ACTIVATION",
+      gate_evaluation_id: gateId, input_version_set_ref: { aggregate_version: 0 },
+      evidence_set_version_id: evidenceSetId, gate_predicate_results: [],
+      progression_envelope_id: progressionId, permitted_progression_classes: ["ACTIVATE"],
+      currentness_ref: "CURRENT", effective_from: at,
     });
     const actions = deriveAvailableActions(authorityPayload, gatePayload, []);
     if (actions.length !== 1 || actions[0] !== "ACTIVATE") throw new Error("TLS_DAY1_ACTION_DERIVATION_FAILED");
@@ -367,52 +346,32 @@ async function createGolden(pool: PersistencePool, payload: unknown): Promise<Go
       [OWNER_DOMAIN, request.idempotencyKey, request.messageId, payloadHash, ticketId, at],
     );
 
-    return Object.freeze({
-      disposition: "CREATED",
-      caseId: ids.preTicketCaseId,
-      ticketId,
-      assessmentResult: "ACCEPTABLE",
-      decision: "ACCEPTED_FOR_FORMATION",
-      state: "ACCEPTED",
-      aggregateVersion: 0,
-    });
+    return Object.freeze({ disposition: "CREATED", caseId: ids.preTicketCaseId, ticketId,
+      assessmentResult: "ACCEPTABLE", decision: "ACCEPTED_FOR_FORMATION", state: "ACCEPTED", aggregateVersion: 0 });
   });
 }
 
 async function actionContext(client: PersistenceClient, ticketId: string): Promise<ActionContext> {
   const context = await client.query<{
-    current_state_code: RuntimeAggregate["state"];
-    aggregate_version: string;
-    responsibility_id: string;
-    holder_ref: string;
-    assignment_ref: string;
-    authority_result_id: string;
-    gate_evaluation_id: string;
-    authority_projection_id: string;
-    gate_projection_id: string;
-    authority_currentness: string;
-    gate_currentness: string;
-    progression_envelope_ref: string;
+    current_state_code: RuntimeAggregate["state"]; aggregate_version: string; responsibility_id: string;
+    holder_ref: string; assignment_ref: string; authority_result_id: string; gate_evaluation_id: string;
+    authority_projection_id: string; gate_projection_id: string; authority_currentness: string;
+    gate_currentness: string; progression_envelope_ref: string;
   }>(
-    "SELECT rt.current_state_code,rt.aggregate_version::text,ra.responsibility_id::text,ra.holder_ref::text,s.assignment_ref::text,ae.authority_result_id::text,ge.gate_evaluation_id::text,ap.authority_projection_id::text,gp.gate_projection_id::text,ap.currentness_ref AS authority_currentness,gp.currentness_ref AS gate_currentness,gp.progression_envelope_ref::text FROM appts.runtime_ticket rt JOIN appts.responsible_assignment ra ON ra.ticket_id=rt.ticket_id AND ra.effective_to IS NULL JOIN appts.assignment_snapshot s ON s.assignment_snapshot_id=ra.assignment_snapshot_id JOIN appts.authority_envelope ae ON ae.ticket_id=rt.ticket_id AND ae.effective_to IS NULL JOIN appts.gate_evaluation ge ON ge.ticket_id=rt.ticket_id JOIN appts.authority_projection ap ON ap.authority_projection_id=rt.current_authority_projection_id JOIN appts.gate_projection gp ON gp.gate_projection_id=rt.current_gate_projection_id WHERE rt.ticket_id=$1 ORDER BY ge.evaluated_at DESC LIMIT 1",
+    "SELECT rt.current_state_code,rt.aggregate_version::text,ra.responsibility_id::text,ra.holder_ref::text,ap.responsible_assignment_ref::text AS assignment_ref,ae.authority_result_id::text,ge.gate_evaluation_id::text,ap.authority_projection_id::text,gp.gate_projection_id::text,ap.currentness_ref AS authority_currentness,gp.currentness_ref AS gate_currentness,gp.progression_envelope_ref::text FROM appts.runtime_ticket rt JOIN appts.responsible_assignment ra ON ra.ticket_id=rt.ticket_id AND ra.effective_to IS NULL JOIN appts.authority_envelope ae ON ae.ticket_id=rt.ticket_id AND ae.effective_to IS NULL JOIN appts.gate_evaluation ge ON ge.ticket_id=rt.ticket_id JOIN appts.authority_projection ap ON ap.authority_projection_id=rt.current_authority_projection_id JOIN appts.gate_projection gp ON gp.gate_projection_id=rt.current_gate_projection_id WHERE rt.ticket_id=$1 ORDER BY ge.evaluated_at DESC LIMIT 1",
     [ticketId],
   );
   if (!context.rowCount) throw new Error("TLS_DAY1_ACTION_CONTEXT_NOT_FOUND");
   const row = context.rows[0]!;
   const authorityActions = await client.query<{ action_class_ref: string; permission_code: string }>(
-    "SELECT action_class_ref,permission_code FROM appts.authority_action WHERE authority_result_id=$1 ORDER BY action_class_ref",
-    [row.authority_result_id],
-  );
+    "SELECT action_class_ref,permission_code FROM appts.authority_action WHERE authority_result_id=$1 ORDER BY action_class_ref", [row.authority_result_id]);
   const progressionClasses = await client.query<{ progression_class_ref: string }>(
-    "SELECT progression_class_ref FROM appts.progression_class WHERE envelope_id=$1 ORDER BY progression_class_ref",
-    [row.progression_envelope_ref],
-  );
+    "SELECT progression_class_ref FROM appts.progression_class WHERE envelope_id=$1 ORDER BY progression_class_ref", [row.progression_envelope_ref]);
   const presented = await client.query<{ action_class_ref: string }>(
     "SELECT m.action_class_ref FROM appts.action_set_snapshot s JOIN appts.action_set_member m ON m.action_set_snapshot_id=s.action_set_snapshot_id WHERE s.ticket_id=$1 AND s.aggregate_version=$2 AND s.currentness_ref='CURRENT' AND m.availability_result_ref='AVAILABLE' ORDER BY s.derived_at DESC,m.action_class_ref",
     [ticketId, Number(row.aggregate_version)],
   );
-  return Object.freeze({
-    ...row,
+  return Object.freeze({ ...row,
     authorityActions: Object.freeze(authorityActions.rows.map((item) => Object.freeze({ ...item }))),
     progressionClasses: Object.freeze(progressionClasses.rows.map((item) => item.progression_class_ref)),
     presentedActions: Object.freeze(presented.rows.map((item) => item.action_class_ref)),
@@ -421,69 +380,39 @@ async function actionContext(client: PersistenceClient, ticketId: string): Promi
 
 async function findDurableEffectResult(pool: PersistencePool, commandId: string): Promise<DurableEffectResult | undefined> {
   const result = await pool.query<{
-    command_id: string;
-    result_hash: string | null;
-    effect_disposition_code: string;
-    reason_ref: string | null;
-    resulting_aggregate_version: string | null;
-    current_state_code: RuntimeAggregate["state"];
+    command_id: string; result_hash: string | null; effect_disposition_code: string; reason_ref: string | null;
+    resulting_aggregate_version: string | null; current_state_code: RuntimeAggregate["state"];
   }>(
     "SELECT request.command_id::text,marker.result_hash,effect.effect_disposition_code,effect.reason_ref,effect.resulting_aggregate_version::text,runtime.current_state_code FROM appts.lifecycle_effect_request request JOIN appts.lifecycle_effect_result effect ON effect.effect_request_id=request.effect_request_id JOIN appts.commit_marker marker ON marker.commit_marker_id=effect.durable_commit_marker_id JOIN appts.runtime_ticket runtime ON runtime.ticket_id=request.ticket_id WHERE request.command_id=$1",
     [commandId],
   );
   if (!result.rowCount) return undefined;
   const row = result.rows[0]!;
-  return Object.freeze({
-    commandId: row.command_id,
-    payloadHash: row.result_hash ?? "",
-    disposition: row.effect_disposition_code as DurableEffectResult["disposition"],
-    reason: row.reason_ref ?? "",
-    aggregateVersion: Number(row.resulting_aggregate_version ?? 0),
-    state: row.current_state_code,
-    auditRef: `audit:${commandId}`,
-  });
+  return Object.freeze({ commandId: row.command_id, payloadHash: row.result_hash ?? "",
+    disposition: row.effect_disposition_code as DurableEffectResult["disposition"], reason: row.reason_ref ?? "",
+    aggregateVersion: Number(row.resulting_aggregate_version ?? 0), state: row.current_state_code, auditRef: `audit:${commandId}` });
 }
 
-function sqlEffectStore(
-  pool: PersistencePool,
-  context: {
-    readonly actor: string;
-    readonly correlation: string;
-    readonly authorityProjection: string;
-    readonly gateProjection: string;
-    readonly authorityResult: string;
-    readonly gateResult: string;
-  },
-): RuntimeEffectStore {
+function sqlEffectStore(pool: PersistencePool, context: {
+  readonly actor: string; readonly correlation: string; readonly authorityProjection: string;
+  readonly gateProjection: string; readonly authorityResult: string; readonly gateResult: string;
+}): RuntimeEffectStore {
   return Object.freeze({
     async loadAggregate(ticketId: string): Promise<RuntimeAggregate | undefined> {
       const result = await pool.query<{
-        ticket_id: string;
-        current_state_code: RuntimeAggregate["state"];
-        aggregate_version: string;
-        purpose_binding_id: string;
-        purpose_identity: string;
-        purpose_version: string;
-        package_identity: string;
-        package_version: string;
-        activation_record_ref: string;
+        ticket_id: string; current_state_code: RuntimeAggregate["state"]; aggregate_version: string;
+        purpose_binding_id: string; activation_record_ref: string;
       }>(
-        "SELECT rt.ticket_id::text,rt.current_state_code,rt.aggregate_version::text,rt.purpose_binding_id::text,pb.purpose_identity,pb.purpose_version,pb.package_identity,pb.package_version,rt.activation_record_ref::text FROM appts.runtime_ticket rt JOIN appts.purpose_extension_binding pb ON pb.binding_id=rt.purpose_binding_id WHERE rt.ticket_id=$1",
+        "SELECT ticket_id::text,current_state_code,aggregate_version::text,purpose_binding_id::text,activation_record_ref::text FROM appts.runtime_ticket WHERE ticket_id=$1",
         [ticketId],
       );
       if (!result.rowCount) return undefined;
       const row = result.rows[0]!;
-      return Object.freeze({
-        ticketId: row.ticket_id,
-        purposeBindingId: row.purpose_binding_id,
-        purposeIdentity: row.purpose_identity,
-        purposeVersion: row.purpose_version,
-        packageIdentity: row.package_identity,
-        packageVersion: row.package_version,
-        activationId: row.activation_record_ref,
-        state: row.current_state_code,
-        aggregateVersion: Number(row.aggregate_version),
-      });
+      if (row.purpose_binding_id !== PURPOSE_BINDING) throw new Error("TLS_DAY1_RUNTIME_PURPOSE_BINDING_MISMATCH");
+      return Object.freeze({ ticketId: row.ticket_id, purposeBindingId: row.purpose_binding_id,
+        purposeIdentity: PURPOSE.purposeIdentity, purposeVersion: PURPOSE.purposeVersion,
+        packageIdentity: PURPOSE.packageIdentity, packageVersion: PURPOSE.packageVersion,
+        activationId: row.activation_record_ref, state: row.current_state_code, aggregateVersion: Number(row.aggregate_version) });
     },
     async findCommandResult(commandId: string): Promise<DurableEffectResult | undefined> {
       return findDurableEffectResult(pool, commandId);
@@ -491,9 +420,7 @@ function sqlEffectStore(
     async commitEffect(expectedVersion: number, next: RuntimeAggregate, result: DurableEffectResult) {
       return tx(pool, async (client) => {
         const current = await client.query<{ aggregate_version: string; current_state_code: RuntimeAggregate["state"] }>(
-          "SELECT aggregate_version::text,current_state_code FROM appts.runtime_ticket WHERE ticket_id=$1 FOR UPDATE",
-          [next.ticketId],
-        );
+          "SELECT aggregate_version::text,current_state_code FROM appts.runtime_ticket WHERE ticket_id=$1 FOR UPDATE", [next.ticketId]);
         if (!current.rowCount || Number(current.rows[0]!.aggregate_version) !== expectedVersion) return { status: "VERSION_CONFLICT" as const };
 
         const at = now();
@@ -541,18 +468,9 @@ async function performAction(pool: PersistencePool, payload: unknown): Promise<u
   const prior = await findDurableEffectResult(pool, intent.action_intent_id);
   const intentHash = hash(JSON.stringify(intent));
   if (prior) {
-    const durable = prior.payloadHash === intentHash
-      ? prior
-      : Object.freeze({ ...prior, disposition: "NO_EFFECT" as const, reason: "CONFLICTING_REPLAY" });
-    return Object.freeze({
-      result: durable.disposition,
-      durable: true,
-      ticketId: intent.ticket_id,
-      action: intent.requested_action_class,
-      state: durable.state,
-      aggregateVersion: durable.aggregateVersion,
-      reason: durable.reason,
-    });
+    const durable = prior.payloadHash === intentHash ? prior : Object.freeze({ ...prior, disposition: "NO_EFFECT" as const, reason: "CONFLICTING_REPLAY" });
+    return Object.freeze({ result: durable.disposition, durable: true, ticketId: intent.ticket_id,
+      action: intent.requested_action_class, state: durable.state, aggregateVersion: durable.aggregateVersion, reason: durable.reason });
   }
 
   const context = await tx(pool, async (client) => actionContext(client, intent.ticket_id));
@@ -562,27 +480,17 @@ async function performAction(pool: PersistencePool, payload: unknown): Promise<u
   if (!context.presentedActions.includes(intent.requested_action_class)) throw new Error("TLS_DAY1_ACTION_NOT_PRESENTED");
 
   const authority: AuthorityResolutionPayload = Object.freeze({
-    authority_result_id: context.authority_result_id,
-    ticket_id: intent.ticket_id,
-    domain_id: DOMAIN,
-    context_ref: { trial: TLS_DAY1_GOLDEN_CONTEXT },
-    assignment_snapshot_refs: [ASSIGNMENT_SNAPSHOT],
-    responsibility_id: context.responsibility_id,
-    responsible_assignment_ref: context.assignment_ref,
-    authority_actions: context.authorityActions,
-    result_status_ref: "AUTHORIZED",
-    currentness_ref: context.authority_currentness,
-    effective_from: intent.intent_time,
+    authority_result_id: context.authority_result_id, ticket_id: intent.ticket_id, domain_id: DOMAIN,
+    context_ref: { trial: TLS_DAY1_GOLDEN_CONTEXT }, assignment_snapshot_refs: [ASSIGNMENT_SNAPSHOT],
+    responsibility_id: context.responsibility_id, responsible_assignment_ref: context.assignment_ref,
+    authority_actions: context.authorityActions, result_status_ref: "AUTHORIZED",
+    currentness_ref: context.authority_currentness, effective_from: intent.intent_time,
   });
   const gate: EvidenceGateResultPayload = Object.freeze({
-    gate_result_id: context.gate_evaluation_id,
-    ticket_id: intent.ticket_id,
-    gate_identity: "TLS_DAY1_INITIAL_ACTIVATION",
-    gate_evaluation_id: context.gate_evaluation_id,
-    input_version_set_ref: { aggregate_version: intent.expected_aggregate_version },
-    gate_predicate_results: [],
-    permitted_progression_classes: context.progressionClasses,
-    currentness_ref: context.gate_currentness,
+    gate_result_id: context.gate_evaluation_id, ticket_id: intent.ticket_id,
+    gate_identity: "TLS_DAY1_INITIAL_ACTIVATION", gate_evaluation_id: context.gate_evaluation_id,
+    input_version_set_ref: { aggregate_version: intent.expected_aggregate_version }, gate_predicate_results: [],
+    permitted_progression_classes: context.progressionClasses, currentness_ref: context.gate_currentness,
     effective_from: intent.intent_time,
   });
   const availableActions = deriveAvailableActions(authority, gate, []);
@@ -593,51 +501,30 @@ async function performAction(pool: PersistencePool, payload: unknown): Promise<u
     [intent.action_intent_id, intent.ticket_id, intent.actor_ref, intent.role_assignment_ref, intent.requested_action_class, intent.presented_source_version_ref, intent.expected_aggregate_version, intent.intent_time, randomUUID()],
   );
 
-  const effect = await executeLifecycleEffect(
-    sqlEffectStore(pool, {
-      actor: intent.actor_ref,
-      correlation: randomUUID(),
-      authorityProjection: context.authority_projection_id,
-      gateProjection: context.gate_projection_id,
-      authorityResult: context.authority_result_id,
-      gateResult: context.gate_evaluation_id,
-    }),
-    {
-      commandId: intent.action_intent_id,
-      payloadHash: intentHash,
-      ticketId: intent.ticket_id,
-      expectedAggregateVersion: intent.expected_aggregate_version,
-      actionClass: "ACTIVATE",
-      targetState: "ACTIVE",
-      availableActions,
-      currentness: "CURRENT",
-    },
-  );
-  return Object.freeze({
-    result: effect.disposition,
-    durable: effect.disposition !== "EFFECT_UNCERTAIN_RECONCILIATION_REQUIRED",
-    ticketId: intent.ticket_id,
-    action: "ACTIVATE",
-    state: effect.state,
-    aggregateVersion: effect.aggregateVersion,
-    reason: effect.reason,
+  const effect = await executeLifecycleEffect(sqlEffectStore(pool, {
+    actor: intent.actor_ref, correlation: randomUUID(), authorityProjection: context.authority_projection_id,
+    gateProjection: context.gate_projection_id, authorityResult: context.authority_result_id, gateResult: context.gate_evaluation_id,
+  }), {
+    commandId: intent.action_intent_id, payloadHash: intentHash, ticketId: intent.ticket_id,
+    expectedAggregateVersion: intent.expected_aggregate_version, actionClass: "ACTIVATE", targetState: "ACTIVE",
+    availableActions, currentness: "CURRENT",
   });
+  return Object.freeze({ result: effect.disposition,
+    durable: effect.disposition !== "EFFECT_UNCERTAIN_RECONCILIATION_REQUIRED",
+    ticketId: intent.ticket_id, action: "ACTIVATE", state: effect.state,
+    aggregateVersion: effect.aggregateVersion, reason: effect.reason });
 }
 
 export function createTlsDay1GoldenDispatcher(pool: PersistencePool, fallback: UiIntentDispatcher): UiIntentDispatcher {
   return Object.freeze({
     async dispatch(contractRef: string, payload: unknown): Promise<unknown> {
-      if (
-        contractRef === PRE_TICKET_INTENT
-        && payload
-        && typeof payload === "object"
-        && (payload as Readonly<Record<string, unknown>>)["trialContext"] === TLS_DAY1_GOLDEN_CONTEXT
-      ) return createGolden(pool, payload);
+      if (contractRef === PRE_TICKET_INTENT && payload && typeof payload === "object"
+        && (payload as Readonly<Record<string, unknown>>)["trialContext"] === TLS_DAY1_GOLDEN_CONTEXT) {
+        return createGolden(pool, payload);
+      }
       if (contractRef === TLS_DAY1_ACTION_INTENT) return performAction(pool, payload);
       return fallback.dispatch(contractRef, payload);
     },
-    async capture(payload: unknown): Promise<unknown> {
-      return fallback.capture(payload);
-    },
+    async capture(payload: unknown): Promise<unknown> { return fallback.capture(payload); },
   });
 }
