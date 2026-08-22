@@ -104,12 +104,12 @@ jobs:
         run: |
           set -euo pipefail
           accepted=e09dc82af348ed61ebeb802a346780173b42b973
-          candidate=59f31eb5df834536b24b63ff95dbeff7bd39cf82
+          candidate=bcf46ae50768343044112df6105d9ca67c7b3365
           git fetch --no-tags origin mcr/codex051-day1-golden-candidate
           test "$(git rev-parse FETCH_HEAD)" = "$candidate"
           mapfile -t changed < <(git diff --name-only "$accepted" "$candidate")
           printf 'candidate_delta=%s\n' "${changed[*]}"
-          test "${#changed[@]}" -eq 7
+          test "${#changed[@]}" -eq 8
           for path in "${changed[@]}"; do
             case "$path" in
               DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/src/dep-bootstrap.ts|\
@@ -118,7 +118,8 @@ jobs:
               DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/tsconfig.json|\
               DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/web/src/views/TicketConsoleView.tsx|\
               DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/web/src/views/WorkQueueView.tsx|\
-              DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/deploy/db/seed-tls-day1-golden.sql) ;;
+              DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/deploy/db/seed-tls-day1-golden.sql|\
+              DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/packages/runtime-d04/package.json) ;;
               *) echo "STOP unexpected candidate path: $path"; exit 1 ;;
             esac
           done
@@ -126,6 +127,8 @@ jobs:
           root=DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
           cd "$root"
           test "$(sha256sum package-lock.json | awk '{print $1}')" = 60f1e9e7e0ba9993c9340af9344790440298f9e2fe861ed50f50c14f2cc7170c
+          test "$(sha256sum apps/api/src/trial/pre-ticket-trial-owner-flow.ts | awk '{print $1}')" = fa6a57a4bb50fdd63884d86ce43fe2b18137c3c0b0554b2b990d57d2771c6106
+          test "$(sha256sum deploy/db/grant-runtime.sh | awk '{print $1}')" = 41b48d45bb88c7e510a88235840b8601658d08e5347e9f7660419f7efc321f0f
           npm run verify:boundaries
           npm run typecheck
           npm run build
