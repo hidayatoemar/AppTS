@@ -10,6 +10,7 @@ import { composeApi, type ApiComposition } from "./composition.ts";
 import { createTrialProjectionPort } from "./projections/trial-projection-port.ts";
 import { registerUiHttpRoutes } from "./routes/ui-http.ts";
 import { createTrialPreTicketIntentDispatcher } from "./trial/pre-ticket-trial-owner-flow.ts";
+import { createTlsDay1GoldenDispatcher } from "./trial/tls-day1-golden-flow.ts";
 
 const DEP_COMPONENT = "api-dep001";
 const SERVICE_WORKER_PATH = "/service-worker.js";
@@ -142,9 +143,10 @@ export async function createDepBootstrapServer(options: DepBootstrapOptions = {}
     ? createPersistencePool({ connectionString: config.databaseUrl })
     : undefined;
   const pool = options.pool ?? ownedPool;
+  const fallbackIntents = pool === undefined ? undefined : createTrialPreTicketIntentDispatcher(pool);
   const composition = options.composition ?? composeApi({
     projections: createTrialProjectionPort(pool!),
-    intents: createTrialPreTicketIntentDispatcher(pool!),
+    intents: createTlsDay1GoldenDispatcher(pool!, fallbackIntents!),
     diagnostics: Object.freeze({
       async retrieve(): Promise<never> { throw new Error("DIAGNOSTIC_AUTHORITY_BINDING_REQUIRED"); },
     }),
