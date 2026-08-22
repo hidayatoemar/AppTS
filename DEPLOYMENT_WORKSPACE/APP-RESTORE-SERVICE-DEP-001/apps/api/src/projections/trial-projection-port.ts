@@ -1,4 +1,5 @@
 import type { PersistencePool } from "@appts-restore-service/persistence";
+import { INT_RUN_TD_05_IDENTITY } from "@appts-restore-service/contracts";
 import type { UiProjectionPort } from "../routes/ui-read.ts";
 
 interface RuntimeTicketRow {
@@ -221,7 +222,7 @@ async function readTicketConsole(pool: PersistencePool, ticketId?: string): Prom
       authority_currentness_ref: row.authority_currentness ?? "MISSING_BINDING",
       gate_result_ref: row.source_gate_result_id,
       gate_currentness_ref: row.gate_currentness ?? "MISSING_BINDING",
-      action_contract_ref: "INT-RUN-TD-05",
+      action_contract_ref: INT_RUN_TD_05_IDENTITY,
       available_actions: Object.freeze(availableActions),
       restriction_profile_ref: restrictionProfile,
     }),
