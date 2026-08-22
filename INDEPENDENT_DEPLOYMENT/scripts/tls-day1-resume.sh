@@ -26,8 +26,6 @@ done
 curl -fsS "http://127.0.0.1:${PORT}/healthz" | tee "$EVIDENCE_DIR/healthz.json"
 curl -fsS "http://127.0.0.1:${PORT}/readyz" | tee "$EVIDENCE_DIR/readyz.json"
 
-# Fail closed on the interrupted MCR-to-DT-014 state: exactly one current
-# ACCEPTED-v0 Ticket must exist and it must still present ACTIVATE.
 python3 - "$PORT" "$EVIDENCE_DIR/current-before.json" <<'PY'
 import json, sys, urllib.request
 port, out = sys.argv[1:]
@@ -52,20 +50,15 @@ with open(out,'w',encoding='utf-8') as f:
 print(ticket)
 PY
 TICKET_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ticketId"])' "$EVIDENCE_DIR/current-before.json")"
-
 echo "resume_ticket_id=${TICKET_ID}" | tee "$EVIDENCE_DIR/resume-ticket.txt"
 
-# Read only: detect whether the interrupted POST already durably wrote its
-# action_intent before the deeper effect failed. No nested sh -lc quoting is
-# used; absolute Compose paths preserve the UUID SQL literal exactly.
+# Read-only interrupted-intent recovery. Timestamp is serialized back to the
+# RFC3339 UTC form used by the original browser-proof request; its instant and
+# action identity are unchanged.
 "${SSH_BASE[@]}" "$REMOTE_HOST" \
-  "sudo docker compose -f '$COMPOSE_FILE' --env-file '$COMPOSE_ENV' exec -T postgres psql -X -U appts_admin -d appts_dep001_independent -Atqc \"SELECT concat_ws(chr(31),action_intent_id::text,ticket_id::text,actor_ref::text,role_assignment_ref::text,requested_action_class,presented_source_version_ref::text,expected_aggregate_version::text,intent_time::text) FROM appts.action_intent WHERE ticket_id='${TICKET_ID}'::uuid ORDER BY intent_time,action_intent_id;\"" \
+  "sudo docker compose -f '$COMPOSE_FILE' --env-file '$COMPOSE_ENV' exec -T postgres psql -X -U appts_admin -d appts_dep001_independent -Atqc \"SELECT concat_ws(chr(31),action_intent_id::text,ticket_id::text,actor_ref::text,role_assignment_ref::text,requested_action_class,presented_source_version_ref::text,expected_aggregate_version::text,to_char(intent_time AT TIME ZONE 'UTC','YYYY-MM-DD\\\"T\\\"HH24:MI:SS.US\\\"Z\\\"')) FROM appts.action_intent WHERE ticket_id='${TICKET_ID}'::uuid ORDER BY intent_time,action_intent_id;\"" \
   | tee "$EVIDENCE_DIR/stored-action-intents.txt"
 
-# Resume the exact presented UI/API path. If a single interrupted action_intent
-# exists, reuse its exact identity and stored fields. Otherwise create one fresh
-# intent from the current Ticket Console. Any HTTP failure body is captured
-# verbatim before stopping.
 python3 - "$PORT" "$EVIDENCE_DIR/current-before.json" "$EVIDENCE_DIR/stored-action-intents.txt" "$EVIDENCE_DIR/action-result.json" "$EVIDENCE_DIR/action-http-error.json" <<'PY'
 import datetime, json, sys, uuid, urllib.error, urllib.request
 port, before_path, stored_path, out, errout = sys.argv[1:]
@@ -155,14 +148,10 @@ for candidate in google-chrome google-chrome-stable chromium chromium-browser; d
 done
 test -n "$CHROME" || { echo 'STOP: no headless Chrome/Chromium binary on Actions runner'; exit 2; }
 "$CHROME" --version | tee "$EVIDENCE_DIR/browser-version.txt"
-"$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=6000 \
-  --dump-dom "http://127.0.0.1:${PORT}/tickets/${TICKET_ID}" > "$EVIDENCE_DIR/ticket-console-after.html"
-"$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=6000 \
-  --dump-dom "http://127.0.0.1:${PORT}/work" > "$EVIDENCE_DIR/work-active.html"
-"$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=6000 --window-size=1440,1400 \
-  --screenshot="$EVIDENCE_DIR/ticket-console-after.png" "http://127.0.0.1:${PORT}/tickets/${TICKET_ID}" >/dev/null
-"$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=6000 --window-size=1440,1400 \
-  --screenshot="$EVIDENCE_DIR/work-active.png" "http://127.0.0.1:${PORT}/work" >/dev/null
+"$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=6000 --dump-dom "http://127.0.0.1:${PORT}/tickets/${TICKET_ID}" > "$EVIDENCE_DIR/ticket-console-after.html"
+"$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=6000 --dump-dom "http://127.0.0.1:${PORT}/work" > "$EVIDENCE_DIR/work-active.html"
+"$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=6000 --window-size=1440,1400 --screenshot="$EVIDENCE_DIR/ticket-console-after.png" "http://127.0.0.1:${PORT}/tickets/${TICKET_ID}" >/dev/null
+"$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=6000 --window-size=1440,1400 --screenshot="$EVIDENCE_DIR/work-active.png" "http://127.0.0.1:${PORT}/work" >/dev/null
 
 grep -Fq "$TICKET_ID" "$EVIDENCE_DIR/ticket-console-after.html"
 grep -Fq 'data-ticket-state="ACTIVE"' "$EVIDENCE_DIR/ticket-console-after.html"
@@ -173,7 +162,6 @@ grep -Fq "$TICKET_ID" "$EVIDENCE_DIR/work-active.html"
 grep -Fq 'ACTIVE' "$EVIDENCE_DIR/work-active.html"
 grep -Fq 'aggregate version 1' "$EVIDENCE_DIR/work-active.html"
 
-# Exact durable server readback via deployment identity only.
 "${SSH_BASE[@]}" "$REMOTE_HOST" \
   "sudo docker compose -f '$COMPOSE_FILE' --env-file '$COMPOSE_ENV' exec -T postgres psql -X -U appts_admin -d appts_dep001_independent -Atqc \"SELECT 'ticket_identity='||count(*) FROM appts.ticket_identity WHERE ticket_id='${TICKET_ID}'::uuid; SELECT 'ticket_formation='||count(*) FROM appts.ticket_formation_record WHERE ticket_id='${TICKET_ID}'::uuid; SELECT 'runtime='||current_state_code||'|'||aggregate_version FROM appts.runtime_ticket WHERE ticket_id='${TICKET_ID}'::uuid; SELECT 'action_intent='||count(*) FROM appts.action_intent WHERE action_intent_id='${ACTION_ID}'::uuid; SELECT 'ticket_action_intents='||count(*) FROM appts.action_intent WHERE ticket_id='${TICKET_ID}'::uuid; SELECT 'effect_request='||count(*) FROM appts.lifecycle_effect_request WHERE command_id='${ACTION_ID}'::uuid; SELECT 'effect_result='||count(*) FROM appts.lifecycle_effect_result r JOIN appts.lifecycle_effect_request q ON q.effect_request_id=r.effect_request_id WHERE q.command_id='${ACTION_ID}'::uuid; SELECT 'transition='||count(*) FROM appts.runtime_state_transition WHERE ticket_id='${TICKET_ID}'::uuid; SELECT 'accepted_decision='||count(*) FROM appts.intake_decision d JOIN appts.ticket_formation_record f ON f.intake_decision_id=d.decision_id WHERE f.ticket_id='${TICKET_ID}'::uuid AND d.decision_code='ACCEPTED_FOR_FORMATION';\"" \
   | tee "$EVIDENCE_DIR/durable-readback.txt"
