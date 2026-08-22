@@ -1,0 +1,31 @@
+name: CODEX051 contract guard
+on:
+  pull_request:
+    branches: [experiment/independent-restore-deploy]
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: 24.19.0}
+      - name: Materialize exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          accepted=e09dc82af348ed61ebeb802a346780173b42b973
+          candidate=0431804c635753e13ec90552d515a31935efe630
+          git fetch --no-tags origin mcr/codex051-day1-golden-candidate
+          test "$(git rev-parse FETCH_HEAD)" = "$candidate"
+          mapfile -t changed < <(git diff --name-only "$accepted" "$candidate")
+          test "${#changed[@]}" -eq 8
+          git checkout "$candidate" -- "${changed[@]}"
+          cd DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+          npm install --global npm@11.17.0
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run build
+          npm run test:contracts
+          echo CODEX051_CONTRACT_GUARD=PASS
