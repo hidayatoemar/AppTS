@@ -11,8 +11,11 @@ mkdir -p "$EVIDENCE_DIR"
 PORT=18080
 KEY="$HOME/.ssh/independent_deploy_key"
 SSH_BASE=(ssh -i "$KEY" -o BatchMode=yes)
+REMOTE_HOST="${INDEP_USER}@${INDEP_HOST}"
+COMPOSE_FILE="/opt/appts-independent-restore-service/deploy/compose/compose.yaml"
+COMPOSE_ENV="/opt/appts-independent-restore-service/deploy/compose/.env"
 "${SSH_BASE[@]}" -o ExitOnForwardFailure=yes -N \
-  -L "${PORT}:127.0.0.1:8080" "${INDEP_USER}@${INDEP_HOST}" &
+  -L "${PORT}:127.0.0.1:8080" "$REMOTE_HOST" &
 TUNNEL_PID=$!
 trap 'kill "$TUNNEL_PID" 2>/dev/null || true' EXIT
 
@@ -53,10 +56,10 @@ TICKET_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ti
 echo "resume_ticket_id=${TICKET_ID}" | tee "$EVIDENCE_DIR/resume-ticket.txt"
 
 # Read only: detect whether the interrupted POST already durably wrote its
-# action_intent before the deeper effect failed. chr(31) is used as an
-# unambiguous field separator so the remote shell needs no JSON string literal.
-"${SSH_BASE[@]}" "${INDEP_USER}@${INDEP_HOST}" \
-  "sudo sh -lc 'cd /opt/appts-independent-restore-service/deploy/compose && docker compose -f compose.yaml --env-file .env exec -T postgres psql -X -U appts_admin -d appts_dep001_independent -Atqc \"SELECT concat_ws(chr(31),action_intent_id::text,ticket_id::text,actor_ref::text,role_assignment_ref::text,requested_action_class,presented_source_version_ref::text,expected_aggregate_version::text,intent_time::text) FROM appts.action_intent WHERE ticket_id=''''${TICKET_ID}'''' ORDER BY intent_time,action_intent_id;\"'" \
+# action_intent before the deeper effect failed. No nested sh -lc quoting is
+# used; absolute Compose paths preserve the UUID SQL literal exactly.
+"${SSH_BASE[@]}" "$REMOTE_HOST" \
+  "sudo docker compose -f '$COMPOSE_FILE' --env-file '$COMPOSE_ENV' exec -T postgres psql -X -U appts_admin -d appts_dep001_independent -Atqc \"SELECT concat_ws(chr(31),action_intent_id::text,ticket_id::text,actor_ref::text,role_assignment_ref::text,requested_action_class,presented_source_version_ref::text,expected_aggregate_version::text,intent_time::text) FROM appts.action_intent WHERE ticket_id='${TICKET_ID}'::uuid ORDER BY intent_time,action_intent_id;\"" \
   | tee "$EVIDENCE_DIR/stored-action-intents.txt"
 
 # Resume the exact presented UI/API path. If a single interrupted action_intent
@@ -171,8 +174,8 @@ grep -Fq 'ACTIVE' "$EVIDENCE_DIR/work-active.html"
 grep -Fq 'aggregate version 1' "$EVIDENCE_DIR/work-active.html"
 
 # Exact durable server readback via deployment identity only.
-"${SSH_BASE[@]}" "${INDEP_USER}@${INDEP_HOST}" \
-  "sudo sh -lc 'cd /opt/appts-independent-restore-service/deploy/compose && docker compose -f compose.yaml --env-file .env exec -T postgres psql -X -U appts_admin -d appts_dep001_independent -Atqc \"SELECT ''ticket_identity=''||count(*) FROM appts.ticket_identity WHERE ticket_id=''''${TICKET_ID}''''; SELECT ''ticket_formation=''||count(*) FROM appts.ticket_formation_record WHERE ticket_id=''''${TICKET_ID}''''; SELECT ''runtime=''||current_state_code||''|''||aggregate_version FROM appts.runtime_ticket WHERE ticket_id=''''${TICKET_ID}''''; SELECT ''action_intent=''||count(*) FROM appts.action_intent WHERE action_intent_id=''''${ACTION_ID}''''; SELECT ''ticket_action_intents=''||count(*) FROM appts.action_intent WHERE ticket_id=''''${TICKET_ID}''''; SELECT ''effect_request=''||count(*) FROM appts.lifecycle_effect_request WHERE command_id=''''${ACTION_ID}''''; SELECT ''effect_result=''||count(*) FROM appts.lifecycle_effect_result r JOIN appts.lifecycle_effect_request q ON q.effect_request_id=r.effect_request_id WHERE q.command_id=''''${ACTION_ID}''''; SELECT ''transition=''||count(*) FROM appts.runtime_state_transition WHERE ticket_id=''''${TICKET_ID}''''; SELECT ''accepted_decision=''||count(*) FROM appts.intake_decision d JOIN appts.ticket_formation_record f ON f.intake_decision_id=d.decision_id WHERE f.ticket_id=''''${TICKET_ID}'''' AND d.decision_code=''ACCEPTED_FOR_FORMATION'';\"'" \
+"${SSH_BASE[@]}" "$REMOTE_HOST" \
+  "sudo docker compose -f '$COMPOSE_FILE' --env-file '$COMPOSE_ENV' exec -T postgres psql -X -U appts_admin -d appts_dep001_independent -Atqc \"SELECT 'ticket_identity='||count(*) FROM appts.ticket_identity WHERE ticket_id='${TICKET_ID}'::uuid; SELECT 'ticket_formation='||count(*) FROM appts.ticket_formation_record WHERE ticket_id='${TICKET_ID}'::uuid; SELECT 'runtime='||current_state_code||'|'||aggregate_version FROM appts.runtime_ticket WHERE ticket_id='${TICKET_ID}'::uuid; SELECT 'action_intent='||count(*) FROM appts.action_intent WHERE action_intent_id='${ACTION_ID}'::uuid; SELECT 'ticket_action_intents='||count(*) FROM appts.action_intent WHERE ticket_id='${TICKET_ID}'::uuid; SELECT 'effect_request='||count(*) FROM appts.lifecycle_effect_request WHERE command_id='${ACTION_ID}'::uuid; SELECT 'effect_result='||count(*) FROM appts.lifecycle_effect_result r JOIN appts.lifecycle_effect_request q ON q.effect_request_id=r.effect_request_id WHERE q.command_id='${ACTION_ID}'::uuid; SELECT 'transition='||count(*) FROM appts.runtime_state_transition WHERE ticket_id='${TICKET_ID}'::uuid; SELECT 'accepted_decision='||count(*) FROM appts.intake_decision d JOIN appts.ticket_formation_record f ON f.intake_decision_id=d.decision_id WHERE f.ticket_id='${TICKET_ID}'::uuid AND d.decision_code='ACCEPTED_FOR_FORMATION';\"" \
   | tee "$EVIDENCE_DIR/durable-readback.txt"
 
 grep -Fxq 'ticket_identity=1' "$EVIDENCE_DIR/durable-readback.txt"
