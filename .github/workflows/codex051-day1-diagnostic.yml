@@ -42,6 +42,7 @@ jobs:
           set -euo pipefail
           root=DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
           db=appts_dep001_codex051
+          pgcid="$(docker ps --filter ancestor=postgres:17.11-bookworm -q | head -n1)"; test -n "$pgcid"
           export PGPASSWORD=codex051-superuser-local-only
           psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d postgres <<SQL
           CREATE ROLE appts_migration LOGIN PASSWORD 'codex051-migration-local-only' NOSUPERUSER INHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
@@ -52,10 +53,9 @@ jobs:
           for f in "$root"/db/migrations/V001__cf01_core_schema.sql "$root"/db/migrations/V002__cf01_runtime_and_exchange_schema.sql "$root"/db/migrations/V003__dg04_diagnostic_persistence.sql "$root"/db/migrations/V004__d05_pending_capture_v2.sql; do
             psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U appts_migration -d "$db" < "$f"
           done
-          APPTS_STAGING_LABEL='STAGING SIMULATION / NON-PRODUCTION' \
-          PGHOST=127.0.0.1 PGPORT=5432 PGDATABASE="$db" PGUSER=appts_migration PGPASSWORD=codex051-migration-local-only \
-          APPTS_DB_NAME="$db" APPTS_MIGRATION_ROLE=appts_migration APPTS_RUNTIME_ROLE=appts_runtime APPTS_DISPOSABLE_DATABASE=true APPTS_DB_NETWORK_MODE=LOOPBACK \
-          bash "$root"/deploy/db/grant-runtime.sh
+          docker cp "$root/deploy/db" "$pgcid:/tmp/codex051-db"
+          docker exec "$pgcid" chmod +x /tmp/codex051-db/grant-runtime.sh
+          docker exec -e PGHOST=127.0.0.1 -e PGPORT=5432 -e PGDATABASE="$db" -e PGUSER=appts_migration -e PGPASSWORD=codex051-migration-local-only -e APPTS_DB_NAME="$db" -e APPTS_MIGRATION_ROLE=appts_migration -e APPTS_RUNTIME_ROLE=appts_runtime -e 'APPTS_STAGING_LABEL=STAGING SIMULATION / NON-PRODUCTION' -e APPTS_DISPOSABLE_DATABASE=true -e APPTS_DB_NETWORK_MODE=LOOPBACK "$pgcid" /tmp/codex051-db/grant-runtime.sh
       - name: Schema dependency trace
         shell: bash
         run: |
@@ -67,35 +67,13 @@ jobs:
           SELECT conrelid::regclass::text AS table_name, conname, pg_get_constraintdef(oid) AS definition
             FROM pg_constraint
            WHERE contype='f'
-             AND conrelid IN (
-               'appts.ticket_identity'::regclass,
-               'appts.ticket_formation_record'::regclass,
-               'appts.runtime_ticket'::regclass,
-               'appts.runtime_context'::regclass,
-               'appts.runtime_state_transition'::regclass,
-               'appts.lifecycle_effect_request'::regclass,
-               'appts.lifecycle_effect_result'::regclass,
-               'appts.action_intent'::regclass
-             )
-           ORDER BY table_name, conname;
-          \echo '=== Relevant source-binding canonical tables ==='
-          SELECT conrelid::regclass::text AS table_name, conname, pg_get_constraintdef(oid) AS definition
-            FROM pg_constraint
-           WHERE contype='f'
-             AND conrelid IN (
-               'appts.purpose_extension_binding'::regclass,
-               'appts.assignment_snapshot'::regclass,
-               'appts.responsible_assignment'::regclass,
-               'appts.authority_envelope'::regclass,
-               'appts.authority_action'::regclass,
-               'appts.progression_envelope'::regclass
-             )
+             AND conrelid IN ('appts.ticket_identity'::regclass,'appts.ticket_formation_record'::regclass,'appts.runtime_ticket'::regclass,'appts.runtime_context'::regclass,'appts.runtime_state_transition'::regclass,'appts.lifecycle_effect_request'::regclass,'appts.lifecycle_effect_result'::regclass,'appts.action_intent'::regclass)
            ORDER BY table_name, conname;
           \echo '=== Runtime effective privileges ==='
           SELECT table_name,string_agg(privilege_type,',' ORDER BY privilege_type) AS privileges
             FROM information_schema.role_table_grants
            WHERE grantee='appts_runtime' AND table_schema='appts'
-             AND table_name IN ('ticket_identity','ticket_formation_record','runtime_ticket','runtime_context','runtime_state_transition','lifecycle_effect_request','lifecycle_effect_result','action_intent','purpose_extension_binding','assignment_snapshot','responsible_assignment','authority_envelope','authority_action','progression_envelope')
+             AND table_name IN ('ticket_identity','ticket_formation_record','runtime_ticket','runtime_context','runtime_state_transition','lifecycle_effect_request','lifecycle_effect_result','action_intent','purpose_extension_binding','assignment_snapshot','responsible_assignment','authority_envelope','authority_action','progression_envelope','gate_evaluation')
            GROUP BY table_name ORDER BY table_name;
           SQL
       - name: Prove current first break at positive formation boundary
