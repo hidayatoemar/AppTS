@@ -33,9 +33,14 @@ export function WorkQueueView() {
     <CurrentnessBanner currentness={projectionCurrentness} />
     {failure ? <p role="alert">{failure}: current work-queue projection is unavailable.</p> : null}
     <p>Current server projection: {tickets.length} runtime Ticket{tickets.length === 1 ? "" : "s"}.</p>
-    {tickets.length === 0 ? <p>No runtime Tickets are currently projected.</p> : <ul>{tickets.map((ticket, index) => <li key={text(ticket.ticket_id) === "Not available from current source" ? String(index) : text(ticket.ticket_id)}>
-      <strong>{text(ticket.ticket_id)}</strong> — {text(ticket.current_state_code)} — aggregate version {String(ticket.aggregate_version ?? "unknown")} — {text(ticket.currentness_ref)}
-    </li>)}</ul>}
+    {tickets.length === 0 ? <p>No runtime Tickets are currently projected.</p> : <ul>{tickets.map((ticket, index) => {
+      const ticketId = text(ticket.ticket_id);
+      const key = ticketId === "Not available from current source" ? String(index) : ticketId;
+      return <li key={key}>
+        {ticketId === "Not available from current source" ? <strong>{ticketId}</strong> : <strong><a href={`/tickets/${encodeURIComponent(ticketId)}`}>{ticketId}</a></strong>}
+        {" — "}{text(ticket.current_state_code)} — aggregate version {String(ticket.aggregate_version ?? "unknown")} — {text(ticket.currentness_ref)}
+      </li>;
+    })}</ul>}
     <p><a href="/intake">Open pre-Ticket intake</a></p>
   </ViewFrame>;
 }
