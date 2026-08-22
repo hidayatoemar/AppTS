@@ -54,7 +54,7 @@ jobs:
           APPTS_STAGING_LABEL='STAGING SIMULATION / NON-PRODUCTION' \
           PGHOST=127.0.0.1 PGPORT=5432 PGDATABASE=appts_codex051 PGUSER=appts_migration PGPASSWORD=codex051-migration-local-only \
           APPTS_DB_NAME=appts_codex051 APPTS_MIGRATION_ROLE=appts_migration APPTS_RUNTIME_ROLE=appts_runtime APPTS_DISPOSABLE_DATABASE=true APPTS_DB_NETWORK_MODE=LOOPBACK \
-          "$root"/deploy/db/grant-runtime.sh
+          bash "$root"/deploy/db/grant-runtime.sh
       - name: Schema dependency trace
         shell: bash
         run: |
