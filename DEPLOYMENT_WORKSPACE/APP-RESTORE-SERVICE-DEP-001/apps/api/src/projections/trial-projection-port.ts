@@ -151,7 +151,7 @@ async function readTicketConsole(pool: PersistencePool, ticketId?: string): Prom
            rc.currentness_ref AS runtime_currentness,
            ra.responsibility_id::text AS responsibility_id,
            ra.holder_ref::text AS holder_ref,
-           assignment.assignment_ref::text AS assignment_ref,
+           ap.responsible_assignment_ref::text AS assignment_ref,
            ap.source_authority_result_id::text AS source_authority_result_id,
            ap.currentness_ref AS authority_currentness,
            gp.source_gate_result_id::text AS source_gate_result_id,
@@ -163,8 +163,6 @@ async function readTicketConsole(pool: PersistencePool, ticketId?: string): Prom
       LEFT JOIN appts.responsible_assignment ra
         ON ra.ticket_id = rt.ticket_id
        AND ra.effective_to IS NULL
-      LEFT JOIN appts.assignment_snapshot assignment
-        ON assignment.assignment_snapshot_id = ra.assignment_snapshot_id
       LEFT JOIN appts.authority_projection ap
         ON ap.authority_projection_id = rt.current_authority_projection_id
       LEFT JOIN appts.gate_projection gp
