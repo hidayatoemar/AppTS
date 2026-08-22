@@ -19,6 +19,7 @@ import {
   I01_INTERFACE_IDENTITY,
   I01_PROFILE_IDENTITY,
   I01_SEMANTIC_VERSION,
+  INT_RUN_TD_05_IDENTITY,
   validateActionIntent,
   validateTicketActivation,
   type ActionIntentPayload,
@@ -29,7 +30,6 @@ import {
 import type { UiIntentDispatcher } from "../routes/ui-intents.ts";
 
 export const TLS_DAY1_GOLDEN_CONTEXT = "TLS-DAY1-GOLDEN" as const;
-export const TLS_DAY1_ACTION_INTENT = "INT-RUN-TD-05" as const;
 
 const PRE_TICKET_INTENT = "APPTS.CORE.D01.PRETICKET_ADMISSION.SUBMISSION / 1.0.0";
 const OWNER_DOMAIN = "APPTS.TLS.DAY1.GOLDEN.OWNER";
@@ -530,7 +530,7 @@ export function createTlsDay1GoldenDispatcher(pool: PersistencePool, fallback: U
         && (payload as Readonly<Record<string, unknown>>)["trialContext"] === TLS_DAY1_GOLDEN_CONTEXT) {
         return createGolden(pool, payload);
       }
-      if (contractRef === TLS_DAY1_ACTION_INTENT) return performAction(pool, payload);
+      if (contractRef === INT_RUN_TD_05_IDENTITY) return performAction(pool, payload);
       return fallback.dispatch(contractRef, payload);
     },
     async capture(payload: unknown): Promise<unknown> { return fallback.capture(payload); },
