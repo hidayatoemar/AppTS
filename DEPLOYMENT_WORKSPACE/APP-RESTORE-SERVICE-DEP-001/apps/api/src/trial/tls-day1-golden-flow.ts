@@ -320,6 +320,18 @@ async function createGolden(pool: PersistencePool, payload: unknown): Promise<Go
     const authorityProjection = randomUUID();
     const gateProjection = randomUUID();
     const actionSnapshot = randomUUID();
+
+    // runtime_ticket is the FK parent of authority/gate projections. Create the
+    // runtime aggregate first, then bind its current projection pointers after
+    // those dependent rows exist. This preserves the frozen schema unchanged.
+    await client.query(
+      "INSERT INTO appts.runtime_ticket(ticket_id,current_state_code,aggregate_version,activation_record_ref,purpose_binding_id,current_context_version,updated_at) VALUES($1,'ACCEPTED',0,$2,$3,1,$4)",
+      [ticketId, formationId, PURPOSE_BINDING, at],
+    );
+    await client.query(
+      "INSERT INTO appts.runtime_context(ticket_id,context_version,purpose_binding_id,domain_id,source_context_refs_json,source_context_refs_json_schema_version,currentness_ref,committed_at) VALUES($1,1,$2,$3,'{\"trial\":\"TLS-DAY1-GOLDEN\"}'::jsonb,'1.0.0','CURRENT',$4)",
+      [ticketId, PURPOSE_BINDING, DOMAIN, at],
+    );
     await client.query(
       "INSERT INTO appts.authority_projection(projection_version,rebuilt_at,authority_projection_id,ticket_id,source_authority_result_id,source_version_ref,permitted_action_set_ref,permitted_action_set_ref_schema_version,responsible_assignment_ref,effective_from,currentness_ref) VALUES(1,$1,$2,$3,$4,$5,'[\"ACTIVATE\"]'::jsonb,'1.0.0',$6,$1,'CURRENT')",
       [at, authorityProjection, ticketId, authorityId, SOURCE_VERSION_REF, ASSIGNMENT_REF],
@@ -334,12 +346,8 @@ async function createGolden(pool: PersistencePool, payload: unknown): Promise<Go
     );
     await client.query("INSERT INTO appts.action_set_member(action_set_snapshot_id,action_class_ref,availability_result_ref) VALUES($1,'ACTIVATE','AVAILABLE')", [actionSnapshot]);
     await client.query(
-      "INSERT INTO appts.runtime_ticket(ticket_id,current_state_code,aggregate_version,activation_record_ref,purpose_binding_id,current_context_version,current_authority_projection_id,current_gate_projection_id,updated_at) VALUES($1,'ACCEPTED',0,$2,$3,1,$4,$5,$6)",
-      [ticketId, formationId, PURPOSE_BINDING, authorityProjection, gateProjection, at],
-    );
-    await client.query(
-      "INSERT INTO appts.runtime_context(ticket_id,context_version,purpose_binding_id,domain_id,source_context_refs_json,source_context_refs_json_schema_version,currentness_ref,committed_at) VALUES($1,1,$2,$3,'{\"trial\":\"TLS-DAY1-GOLDEN\"}'::jsonb,'1.0.0','CURRENT',$4)",
-      [ticketId, PURPOSE_BINDING, DOMAIN, at],
+      "UPDATE appts.runtime_ticket SET current_authority_projection_id=$1,current_gate_projection_id=$2,updated_at=$3 WHERE ticket_id=$4",
+      [authorityProjection, gateProjection, at, ticketId],
     );
     await client.query(
       "INSERT INTO appts.idempotency_ledger(owner_domain_ref,idempotency_key,command_or_message_identity,payload_hash,durable_result_ref,first_seen_at,last_seen_at,conflict_status_ref) VALUES($1,$2,$3,$4,$5,$6,$6,'NONE')",
