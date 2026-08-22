@@ -1,0 +1,117 @@
+---
+- name: Apply controlled TLS Day-1 static Trial seed under deployment identity only
+  hosts: independent
+  become: true
+  gather_facts: false
+  vars:
+    appts_root: /opt/appts-independent-restore-service
+    appts_compose_dir: /opt/appts-independent-restore-service/deploy/compose
+    appts_db_name: appts_dep001_independent
+    seed_file: /opt/appts-independent-restore-service/deploy/db/seed-tls-day1-golden.sql
+    seed_sha256: ddbfffc8ecddcabf8cec73ce737a977d1e91253efee42e51c9e57e44efecda82
+  tasks:
+    - name: Verify exact controlled seed identity
+      ansible.builtin.stat:
+        path: "{{ seed_file }}"
+        checksum_algorithm: sha256
+        get_checksum: true
+      register: seed_stat
+
+    - name: Require exact CODEX051 controlled seed
+      ansible.builtin.assert:
+        that:
+          - seed_stat.stat.exists
+          - seed_stat.stat.checksum == seed_sha256
+        fail_msg: "STOP: TLS Day-1 controlled seed identity mismatch"
+
+    - name: Prove actual appts_runtime rejects static Trial seed
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cat "{{ seed_file }}" | docker compose -f compose.yaml --env-file .env exec -T api \
+          node --input-type=module -e '
+            import {createPersistencePool} from "@appts-restore-service/persistence";
+            let sql=""; for await (const chunk of process.stdin) sql += chunk;
+            const pool=createPersistencePool({connectionString:process.env.DATABASE_URL});
+            let rejected=false;
+            try { await pool.query(sql); }
+            catch (error) {
+              const message=String(error?.message ?? error);
+              console.log(`runtime_seed_rejection=${message}`);
+              if (message.includes("TLS-DAY1 STOP: static Trial binding seed must not run as appts_runtime")) rejected=true;
+              else throw error;
+            } finally { await pool.end(); }
+            if (!rejected) { console.error("STOP: seed unexpectedly accepted under appts_runtime"); process.exit(9); }
+          '
+      args:
+        executable: /bin/bash
+        chdir: "{{ appts_compose_dir }}"
+      register: runtime_rejection
+      changed_when: false
+
+    - name: Apply exact controlled seed as deployment identity
+      ansible.builtin.shell: |
+        set -euo pipefail
+        docker compose -f compose.yaml --env-file .env exec -T postgres \
+          psql -X -v ON_ERROR_STOP=1 -U appts_admin -d "{{ appts_db_name }}" < "{{ seed_file }}"
+      args:
+        executable: /bin/bash
+        chdir: "{{ appts_compose_dir }}"
+      register: seed_apply
+      changed_when: true
+
+    - name: Read back controlled static bindings and zero Ticket state
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - compose.yaml
+          - --env-file
+          - .env
+          - exec
+          - -T
+          - postgres
+          - psql
+          - -X
+          - -U
+          - appts_admin
+          - -d
+          - "{{ appts_db_name }}"
+          - -Atqc
+          - >-
+            SELECT 'source_ref='||count(*) FROM appts.source_ref WHERE source_ref_id='51010000-0000-4000-8000-000000000001';
+            SELECT 'source_version='||count(*) FROM appts.source_version_ref WHERE source_version_ref_id='51010000-0000-4000-8000-000000000002';
+            SELECT 'release_identity='||count(*) FROM appts.release_identity WHERE release_identity_id='51010000-0000-4000-8000-000000000003';
+            SELECT 'compatibility='||count(*) FROM appts.compatibility_declaration WHERE compatibility_declaration_id='51010000-0000-4000-8000-000000000004';
+            SELECT 'purpose_binding='||count(*) FROM appts.purpose_extension_binding WHERE binding_id='51010000-0000-4000-8000-000000000005';
+            SELECT 'assignment_snapshot='||count(*) FROM appts.assignment_snapshot WHERE assignment_snapshot_id='51010000-0000-4000-8000-000000000006';
+            SELECT 'ticket_identity='||count(*) FROM appts.ticket_identity;
+            SELECT 'ticket_formation='||count(*) FROM appts.ticket_formation_record;
+            SELECT 'runtime_ticket='||count(*) FROM appts.runtime_ticket;
+      args:
+        chdir: "{{ appts_compose_dir }}"
+      register: seed_readback
+      changed_when: false
+
+    - name: Require static binding seed and no Ticket manufacture
+      ansible.builtin.assert:
+        that:
+          - "'source_ref=1' in seed_readback.stdout_lines"
+          - "'source_version=1' in seed_readback.stdout_lines"
+          - "'release_identity=1' in seed_readback.stdout_lines"
+          - "'compatibility=1' in seed_readback.stdout_lines"
+          - "'purpose_binding=1' in seed_readback.stdout_lines"
+          - "'assignment_snapshot=1' in seed_readback.stdout_lines"
+          - "'ticket_identity=0' in seed_readback.stdout_lines"
+          - "'ticket_formation=0' in seed_readback.stdout_lines"
+          - "'runtime_ticket=0' in seed_readback.stdout_lines"
+        fail_msg: "STOP: controlled TLS Day-1 seed readback differs from bounded contract"
+
+    - name: Report TLS Day-1 seed evidence
+      ansible.builtin.debug:
+        msg:
+          - "seed_sha256={{ seed_stat.stat.checksum }}"
+          - "runtime_seed_rejection=PASS"
+          - "deployment_seed_application=PASS"
+          - "seed_readback={{ seed_readback.stdout_lines }}"
+          - "ticket_manufacture_by_seed=ZERO"
