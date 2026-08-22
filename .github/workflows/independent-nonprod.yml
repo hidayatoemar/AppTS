@@ -37,7 +37,7 @@ jobs:
           test "$confirmation" = 'INDEPENDENT_NONPROD' || { echo 'BLOCKED: invalid confirmation token'; exit 2; }
           test -z "${extra:-}" || { echo 'BLOCKED: malformed request'; exit 2; }
           case "$action" in
-            preflight|deploy|resync|codeverify|start|status|dbobserve|runtimegrant|trialreplay|httptrial|browserproof|apply049|teardown) ;;
+            preflight|deploy|resync|codeverify|start|status|dbobserve|runtimegrant|trialreplay|httptrial|browserproof|day1resume|apply049|teardown) ;;
             *) echo 'BLOCKED: unsupported action'; exit 2 ;;
           esac
           echo "REQUESTED_ACTION=$action" >> "$GITHUB_ENV"
@@ -134,6 +134,7 @@ jobs:
             trialreplay)  playbook=playbooks/trial-replay.yml ;;
             httptrial)    playbook=playbooks/http-trial.yml ;;
             browserproof) playbook='' ;;
+            day1resume)   playbook='' ;;
             apply049)     playbook='' ;;
             teardown)     playbook=playbooks/teardown.yml ;;
             *) echo 'BLOCKED: unsupported action'; exit 2 ;;
@@ -147,6 +148,8 @@ jobs:
               bash ../scripts/apply-codex049.sh
             elif [ "$REQUESTED_ACTION" = 'browserproof' ]; then
               bash ../scripts/browser-proof.sh
+            elif [ "$REQUESTED_ACTION" = 'day1resume' ]; then
+              bash ../scripts/tls-day1-resume.sh
             else
               ansible-playbook "$playbook"
             fi
