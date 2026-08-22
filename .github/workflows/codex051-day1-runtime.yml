@@ -21,7 +21,7 @@ jobs:
         with: {fetch-depth: 0}
       - uses: actions/setup-node@v4
         with: {node-version: 24.19.0}
-      - name: Materialize exact bounded candidate
+      - name: Materialize exact bounded candidate and freeze guard
         shell: bash
         run: |
           set -euo pipefail
@@ -30,7 +30,7 @@ jobs:
           git fetch --no-tags origin mcr/codex051-day1-golden-candidate
           test "$(git rev-parse FETCH_HEAD)" = "$candidate"
           mapfile -t changed < <(git diff --name-only "$accepted" "$candidate")
-          printf 'candidate_delta=%s\n' "${changed[*]}"
+          printf '%s\n' "${changed[@]}" | tee /tmp/codex051-changed.txt
           test "${#changed[@]}" -eq 8
           for path in "${changed[@]}"; do
             case "$path" in
@@ -45,22 +45,43 @@ jobs:
               *) echo "STOP unexpected candidate path: $path"; exit 1 ;;
             esac
           done
+          git diff --exit-code "$accepted" "$candidate" -- \
+            DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/package-lock.json \
+            DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/db/migrations/V001__cf01_core_schema.sql \
+            DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/db/migrations/V002__cf01_runtime_and_exchange_schema.sql \
+            DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/db/migrations/V003__dg04_diagnostic_persistence.sql \
+            DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/db/migrations/V004__d05_pending_capture_v2.sql \
+            DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/deploy/db/grant-runtime.sh \
+            DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/src/trial/pre-ticket-trial-owner-flow.ts
           git checkout "$candidate" -- "${changed[@]}"
+          root=DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+          test "$(sha256sum "$root/package-lock.json" | awk '{print $1}')" = 60f1e9e7e0ba9993c9340af9344790440298f9e2fe861ed50f50c14f2cc7170c
+          test "$(sha256sum "$root/apps/api/src/trial/pre-ticket-trial-owner-flow.ts" | awk '{print $1}')" = fa6a57a4bb50fdd63884d86ce43fe2b18137c3c0b0554b2b990d57d2771c6106
+          test "$(sha256sum "$root/deploy/db/grant-runtime.sh" | awk '{print $1}')" = 41b48d45bb88c7e510a88235840b8601658d08e5347e9f7660419f7efc321f0f
+          echo 'CODEX051_DELTA_GUARD=PASS'
+      - name: Full source regression
+        shell: bash
+        run: |
+          set -euo pipefail
           cd DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
-          test "$(sha256sum package-lock.json | awk '{print $1}')" = 60f1e9e7e0ba9993c9340af9344790440298f9e2fe861ed50f50c14f2cc7170c
-          test "$(sha256sum apps/api/src/trial/pre-ticket-trial-owner-flow.ts | awk '{print $1}')" = fa6a57a4bb50fdd63884d86ce43fe2b18137c3c0b0554b2b990d57d2771c6106
-          test "$(sha256sum deploy/db/grant-runtime.sh | awk '{print $1}')" = 41b48d45bb88c7e510a88235840b8601658d08e5347e9f7660419f7efc321f0f
           npm install --global npm@11.17.0
           npm ci --ignore-scripts --no-audit --no-fund
           npm run verify:boundaries
           npm run typecheck
           npm run build
+          npm run test:contracts
+          npm run test:integration
+          npm run test:dg04
+          npm run test:adverse
+          npm run test:unit
+          npm run test:nfr
+          echo 'CODEX051_SOURCE_REGRESSION=PASS'
       - name: Create PostgreSQL 17 least-privilege runtime
         shell: bash
         run: |
           set -euo pipefail
           root=DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
-          db=appts_dep001_codex051_runtime
+          db=appts_dep001_codex051_final
           pgcid="$(docker ps --filter ancestor=postgres:17.11-bookworm -q | head -n1)"; test -n "$pgcid"
           PGPASSWORD=codex051-superuser-local-only psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d postgres <<SQL
           CREATE ROLE appts_migration LOGIN PASSWORD 'codex051-migration-local-only' NOSUPERUSER INHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
@@ -81,10 +102,11 @@ jobs:
           grep -q 'static Trial binding seed must not run as appts_runtime' /tmp/runtime-seed.err
           PGPASSWORD=codex051-migration-local-only psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U appts_migration -d "$db" < "$root/deploy/db/seed-tls-day1-golden.sql"
           test "$(PGPASSWORD=codex051-runtime-local-only psql -X -At -h 127.0.0.1 -U appts_runtime -d "$db" -c 'select current_user')" = appts_runtime
-      - name: Execute Day1 positive path through HTTP
+          echo 'CODEX051_RUNTIME_SPLIT=PASS'
+      - name: Execute final Day1 Golden Path through HTTP
         shell: bash
         env:
-          DATABASE_URL: postgresql://appts_runtime:codex051-runtime-local-only@127.0.0.1:5432/appts_dep001_codex051_runtime
+          DATABASE_URL: postgresql://appts_runtime:codex051-runtime-local-only@127.0.0.1:5432/appts_dep001_codex051_final
           API_LISTEN_PORT: 8080
           APPTS_TRIAL_DISCLOSURE_LABEL_REF: 6f79da70-412f-469e-bcf7-f544f81b8aa7
         run: |
@@ -95,10 +117,14 @@ jobs:
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/readyz >/dev/null && break || sleep 1; done
           test "$(curl -fsS http://127.0.0.1:8080/healthz)" = '{"status":"ok"}'
           test "$(curl -fsS http://127.0.0.1:8080/readyz)" = '{"status":"ready"}'
+          negative='{"intent_contract_ref":"APPTS.CORE.D01.PRETICKET_ADMISSION.SUBMISSION / 1.0.0","payload":{"messageId":"51050000-0000-4000-8000-000000000001","idempotencyKey":"51050000-0000-4000-8000-000000000002","correlationId":"51050000-0000-4000-8000-000000000003","trialContext":"TD-PRE-001"}}'
+          curl -fsS -H 'content-type: application/json' -d "$negative" http://127.0.0.1:8080/api/v1/ui/intents | tee /tmp/negative.json
+          grep -q 'HOLD_AS_PRE_TICKET' /tmp/negative.json
+          test "$(PGPASSWORD=codex051-migration-local-only psql -X -At -h 127.0.0.1 -U appts_migration -d appts_dep001_codex051_final -c 'select count(*) from appts.runtime_ticket')" = 0
           positive='{"intent_contract_ref":"APPTS.CORE.D01.PRETICKET_ADMISSION.SUBMISSION / 1.0.0","payload":{"messageId":"51030000-0000-4000-8000-000000000001","idempotencyKey":"51030000-0000-4000-8000-000000000002","correlationId":"51030000-0000-4000-8000-000000000003","trialContext":"TLS-DAY1-GOLDEN"}}'
           curl -fsS -H 'content-type: application/json' -d "$positive" http://127.0.0.1:8080/api/v1/ui/intents | tee /tmp/positive.json
           ticket=$(node -e "const x=require('/tmp/positive.json');if(x.disposition!=='CREATED'||x.assessmentResult!=='ACCEPTABLE'||x.decision!=='ACCEPTED_FOR_FORMATION'||x.state!=='ACCEPTED'||x.aggregateVersion!==0)process.exit(2);process.stdout.write(x.ticketId)")
-          echo "ticket=$ticket"
+          test -n "$ticket"
           curl -fsS -H 'content-type: application/json' -d "$positive" http://127.0.0.1:8080/api/v1/ui/intents | tee /tmp/replay.json
           TICKET="$ticket" node -e "const x=require('/tmp/replay.json');if(x.disposition!=='IDEMPOTENT_REPLAY'||x.ticketId!==process.env.TICKET)process.exit(2)"
           changed='{"intent_contract_ref":"APPTS.CORE.D01.PRETICKET_ADMISSION.SUBMISSION / 1.0.0","payload":{"messageId":"51030000-0000-4000-8000-000000000009","idempotencyKey":"51030000-0000-4000-8000-000000000002","correlationId":"51030000-0000-4000-8000-000000000003","trialContext":"TLS-DAY1-GOLDEN"}}'
@@ -120,7 +146,92 @@ jobs:
           node -e "const x=require('/tmp/after.json'),d=x.data;if(d.current_state_code!=='ACTIVE'||d.aggregate_version!==1||d.available_actions.length!==0||d.restriction_profile_ref!=='POST_ACTIVATION_REFRESH_REQUIRED')process.exit(2)"
           curl -fsS -H 'content-type: application/json' --data-binary @/tmp/action.json http://127.0.0.1:8080/api/v1/ui/intents | tee /tmp/action-replay.json
           node -e "const x=require('/tmp/action-replay.json');if(x.result!=='EFFECT_APPLIED'||x.state!=='ACTIVE'||x.aggregateVersion!==1)process.exit(2)"
-          counts=$(PGPASSWORD=codex051-migration-local-only psql -X -At -F '|' -h 127.0.0.1 -U appts_migration -d appts_dep001_codex051_runtime -c "SELECT (SELECT count(*) FROM appts.ticket_identity),(SELECT count(*) FROM appts.ticket_formation_record),(SELECT count(*) FROM appts.runtime_ticket WHERE current_state_code='ACTIVE' AND aggregate_version=1),(SELECT count(*) FROM appts.action_intent),(SELECT count(*) FROM appts.lifecycle_effect_request),(SELECT count(*) FROM appts.lifecycle_effect_result),(SELECT count(*) FROM appts.runtime_state_transition),(SELECT count(*) FROM appts.intake_decision WHERE decision_code='ACCEPTED_FOR_FORMATION');")
+          counts=$(PGPASSWORD=codex051-migration-local-only psql -X -At -F '|' -h 127.0.0.1 -U appts_migration -d appts_dep001_codex051_final -c "SELECT (SELECT count(*) FROM appts.ticket_identity),(SELECT count(*) FROM appts.ticket_formation_record),(SELECT count(*) FROM appts.runtime_ticket WHERE current_state_code='ACTIVE' AND aggregate_version=1),(SELECT count(*) FROM appts.action_intent),(SELECT count(*) FROM appts.lifecycle_effect_request),(SELECT count(*) FROM appts.lifecycle_effect_result),(SELECT count(*) FROM appts.runtime_state_transition),(SELECT count(*) FROM appts.intake_decision WHERE decision_code='ACCEPTED_FOR_FORMATION');")
           echo "day1_counts=$counts"
           test "$counts" = '1|1|1|1|1|1|1|1'
           echo 'TLS_DAY1_RUNTIME_GATE=PASS'
+      - name: Build DT-consumable transfer
+        shell: bash
+        run: |
+          set -euo pipefail
+          accepted=e09dc82af348ed61ebeb802a346780173b42b973
+          candidate=2b749b2e1db43bab941e2e35514162bd4e61c0c5
+          pkg=out/CODEX051_DT_TRANSFER_v1.0_CONTROLLED
+          mkdir -p "$pkg/overlay"
+          cp /tmp/codex051-changed.txt "$pkg/CHANGED_FILES.txt"
+          while IFS= read -r path; do mkdir -p "$pkg/overlay/$(dirname "$path")"; cp "$path" "$pkg/overlay/$path"; done < "$pkg/CHANGED_FILES.txt"
+          git diff "$accepted" "$candidate" -- $(cat "$pkg/CHANGED_FILES.txt") > "$pkg/CODEX051.patch"
+          cat > "$pkg/README.md" <<EOF
+          # CODEX051 DT Transfer v1.0 CONTROLLED
+          Authority: MCR-to-CODEX-051
+          Accepted execution base: $accepted
+          Candidate identity: $candidate
+          Scope: RESTORE_SERVICE TLS Day-1 bounded positive Golden Path only.
+          Build Pack remains frozen. Production/UAT/real data are not authorized.
+          EOF
+          cat > "$pkg/APPLY.sh" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          target="${1:-.}"
+          here="$(cd "$(dirname "$0")" && pwd)"
+          root=DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+          test "$(sha256sum "$target/$root/package-lock.json" | awk '{print $1}')" = 60f1e9e7e0ba9993c9340af9344790440298f9e2fe861ed50f50c14f2cc7170c
+          test "$(sha256sum "$target/$root/apps/api/src/trial/pre-ticket-trial-owner-flow.ts" | awk '{print $1}')" = fa6a57a4bb50fdd63884d86ce43fe2b18137c3c0b0554b2b990d57d2771c6106
+          test "$(sha256sum "$target/$root/deploy/db/grant-runtime.sh" | awk '{print $1}')" = 41b48d45bb88c7e510a88235840b8601658d08e5347e9f7660419f7efc321f0f
+          while IFS= read -r path; do mkdir -p "$target/$(dirname "$path")"; cp "$here/overlay/$path" "$target/$path"; done < "$here/CHANGED_FILES.txt"
+          echo 'CODEX051 overlay applied after accepted-base guards.'
+          EOF
+          chmod +x "$pkg/APPLY.sh"
+          cat > "$pkg/APPLY_AND_VERIFY.md" <<'EOF'
+          # Apply and verify
+          1. Start from the current accepted RESTORE_SERVICE execution baseline; do not mutate the frozen Build Pack.
+          2. Run `./APPLY.sh <repository-root>`; it fails closed unless accepted package-lock, CODEX049 owner-flow, and grant-runtime identities match.
+          3. In the app workspace run npm ci, architecture boundary verification, typecheck/build, then contracts/integration/DG04/adverse/unit/NFR tests.
+          4. Apply unchanged V001-V004 and accepted grant-runtime with migration/deployment identity. No migration or grant is added by CODEX051.
+          5. Run `deploy/db/seed-tls-day1-golden.sql` only with migration/deployment identity; it intentionally STOPs under appts_runtime.
+          6. Start API with the accepted least-privilege appts_runtime DATABASE_URL and Trial disclosure label.
+          7. Submit controlled TLS-DAY1-GOLDEN pre-ticket input through /api/v1/ui/intents; verify ACCEPTABLE, ACCEPTED_FOR_FORMATION, durable Ticket ACCEPTED v0.
+          8. Verify Work Queue and Ticket Console show current holder/assignment/authority/gate and ACTIVATE.
+          9. Invoke INT-RUN-TD-05 ACTIVATE using presented source version and expected aggregate version 0; verify durable EFFECT_APPLIED, ACTIVE v1, refresh-visible state, and replay produces no second transition.
+          10. Re-run TD-PRE-001 and confirm HOLD_AS_PRE_TICKET with no Ticket formation.
+          EOF
+          cat > "$pkg/GOLDEN_PATH_TRACE_MATRIX.md" <<'EOF'
+          # Golden Path trace matrix
+          | Step | Expected | Constructed | Runtime-bound | Browser/API reachable | User-actionable | Evidence |
+          |---|---|---:|---:|---:|---:|---|
+          | Valid external/intake input | governed admission input | PASS | PASS | PASS | n/a | HTTP pre-ticket intent |
+          | Admission | ACCEPTABLE / ACCEPTED_FOR_FORMATION | PASS | PASS | PASS | n/a | D-01 + durable assessment/decision |
+          | Ticket formation | durable Ticket identity | PASS | PASS | PASS | n/a | ticket_identity + formation record |
+          | Runtime state | ACCEPTED v0 | PASS | PASS | PASS | n/a | runtime_ticket |
+          | Work Queue | Ticket visible | PASS | PASS | PASS | PASS | UX-RS-01 |
+          | Ticket Console | operational context | PASS | PASS | PASS | PASS | UX-RS-03 |
+          | Role/authority/gate | current bindings | PASS | PASS | PASS | PASS | current projections |
+          | Permitted action set | ACTIVATE available | PASS | PASS | PASS | PASS | action snapshot/member |
+          | Action invocation | governed ACTIVATE | PASS | PASS | PASS | PASS | INT-RUN-TD-05 -> D-04 |
+          | Durable refresh | ACTIVE v1 and replay-stable | PASS | PASS | PASS | PASS | effect/result/transition + refreshed console |
+          EOF
+          cat > "$pkg/VERIFICATION_SUMMARY.md" <<'EOF'
+          # Verification summary
+          First break: accepted HTTP Trial composition had only TD-PRE-001 negative/incomplete owner-flow and no positive ACCEPTED_FOR_FORMATION -> Ticket formation/runtime composition path.
+          Classification: primary missing technical composition/wiring; secondary missing controlled Trial runtime Role/authority/gate instance binding and discoverability. Not missing Product semantics, schema meaning, or security-policy authority.
+          Correction: bounded positive Trial owner-flow, controlled static Trial binding seed, runtime/UI projection wiring, Ticket navigation/action presentation, and package-entry metadata required for existing D-04 reuse.
+          TD-PRE-001 owner-flow remains byte-identical and behaviorally HOLD_AS_PRE_TICKET.
+          Runtime remains accepted least-privilege appts_runtime; static Trial seed fails closed under runtime identity.
+          Producer next-consumer gate: PASS in disposable non-production PostgreSQL 17 + real HTTP boundary.
+          Current DT deployment still requires DT application/readback verification; Production/UAT/real data remain unauthorized.
+          EOF
+          node - "$pkg" "$accepted" "$candidate" <<'NODE'
+          const fs=require('fs'),path=require('path'),crypto=require('crypto');
+          const [pkg,accepted,candidate]=process.argv.slice(2);
+          const changed=fs.readFileSync(path.join(pkg,'CHANGED_FILES.txt'),'utf8').trim().split(/\r?\n/);
+          const files=changed.map(p=>({path:p,sha256:crypto.createHash('sha256').update(fs.readFileSync(path.join(pkg,'overlay',p))).digest('hex')}));
+          fs.writeFileSync(path.join(pkg,'MANIFEST.json'),JSON.stringify({identity:'CODEX051_DT_TRANSFER_v1.0_CONTROLLED',authority:'MCR-to-CODEX-051',accepted_base:accepted,candidate_commit:candidate,changed_file_count:files.length,files},null,2)+'\n');
+          NODE
+          (cd "$pkg" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          echo 'CODEX051_TRANSFER_BUILD=PASS'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CODEX051_DT_TRANSFER_v1.0_CONTROLLED
+          path: out/CODEX051_DT_TRANSFER_v1.0_CONTROLLED
+          if-no-files-found: error
+          retention-days: 30
