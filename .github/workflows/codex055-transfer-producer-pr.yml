@@ -1,0 +1,130 @@
+name: CODEX055 frozen DT transfer producer
+on:
+  pull_request:
+    branches: [experiment/independent-restore-deploy]
+    paths:
+      - '.github/workflows/codex055-transfer-producer-pr.yml'
+      - '.github/workflows/codex055-transfer-producer.yml'
+permissions:
+  contents: read
+jobs:
+  transfer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Produce exact transfer ZIP from frozen verified source
+        shell: bash
+        env:
+          BASE: b5551eddbbcd82675997c740b5471bb3cc74241b
+          SRC: 741af578f1cab210d37dbb5f96877c6a09f62dd8
+          W: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+          N: CODEX055_DT_TRANSFER_v1.0_CONTROLLED
+        run: |
+          set -euo pipefail
+          test "$(git merge-base "$BASE" "$SRC")" = "$BASE"
+          tmp="$(mktemp -d)"; root="$tmp/$N"; mkdir -p "$root/overlay"
+          cat > /tmp/codex055-files <<EOF
+          $W/apps/api/src/dep-bootstrap.ts
+          $W/apps/api/src/projections/trial-projection-port.ts
+          $W/apps/api/src/trial/tls-day2-arc001-flow.ts
+          $W/apps/api/tsconfig.json
+          $W/apps/web/src/app.tsx
+          $W/apps/web/src/router.ts
+          $W/apps/web/src/views/ClosureReadinessView.tsx
+          $W/apps/web/src/views/EvidenceVerificationView.tsx
+          $W/apps/web/src/views/GuidedActionView.tsx
+          $W/apps/web/src/views/TicketConsoleView.tsx
+          $W/apps/web/src/views/TrainerConsoleView.tsx
+          $W/deploy/db/seed-tls-day2-arc001.sql
+          $W/packages/core-d03/package.json
+          $W/tests/dep001/tls-day2-arc001-boundary.test.mjs
+          $W/tests/dep001/tls-day2-producer-runtime-proof.py
+          $W/tests/integration/ui-routes.integration.test.ts
+          EOF
+          sed -i 's/^          //' /tmp/codex055-files
+          cp /tmp/codex055-files "$root/ADMITTED_OVERLAY_FILES.txt"
+          while IFS= read -r f; do mkdir -p "$root/overlay/$(dirname "$f")"; git show "$SRC:$f" > "$root/overlay/$f"; done < /tmp/codex055-files
+          mapfile -t files < /tmp/codex055-files
+          git diff --binary "$BASE" "$SRC" -- "${files[@]}" > "$root/SOURCE_DIFF.patch"
+          (cd "$root/overlay" && sha256sum "${files[@]}" > ../OVERLAY_SHA256SUMS.txt)
+          cat > /tmp/protected <<EOF
+          $W/apps/api/src/trial/pre-ticket-trial-owner-flow.ts
+          $W/apps/api/src/trial/tls-day1-golden-flow.ts
+          $W/deploy/db/seed-tls-day1-golden.sql
+          $W/deploy/db/grant-runtime.sh
+          $W/db/migrations/V001__cf01_core_schema.sql
+          $W/db/migrations/V002__cf01_runtime_and_exchange_schema.sql
+          $W/db/migrations/V003__dg04_diagnostic_persistence.sql
+          $W/db/migrations/V004__d05_pending_capture_v2.sql
+          $W/package-lock.json
+          EOF
+          sed -i 's/^          //' /tmp/protected
+          : > "$root/PROTECTED_SOURCE_SHA256SUMS.txt"
+          while IFS= read -r f; do test "$(git rev-parse "$BASE:$f")" = "$(git rev-parse "$SRC:$f")"; git show "$BASE:$f" | sha256sum | sed "s#  -#  $f#" >> "$root/PROTECTED_SOURCE_SHA256SUMS.txt"; done < /tmp/protected
+          cat > "$root/SYMBOLIC_OPAQUE_MAPPING.md" <<'EOF'
+          # ARC001 Trial Mapping
+          Scenario `TLS-D2-RS-SCN-01`; subject `TRIAL-RS-SERVICE-001`.
+          Source `SIM-NMS-RS-TLS-D2-01` = `52010000-0000-4000-8000-000000000003`; adapter `SIM-RS-QER-PROFILE-V1` = `52010000-0000-4000-8000-000000000004`.
+          Responsible A: role `51010000-0000-4000-8000-000000000009`, holder `...000a`, assignment `...000b`, snapshot `...0006`.
+          Verifier B: role `52010000-0000-4000-8000-000000000011`, holder `...0012`, assignment `...0013`, snapshot `...0014`.
+          Terminal Authority C: role `...0021`, holder `...0022`, assignment `...0023`, snapshot `...0024`.
+          Closure-readiness D: role `...0031`, holder `...0032`, assignment `...0033`, snapshot `...0034`.
+          Actions: `RS_TRIAL_REQUEST_RESTORATION_VERIFICATION`, `RS_TRIAL_VERIFY_RESTORATION_EVIDENCE`, `RS_TRIAL_SUBMIT_TERMINAL_DISPOSITION_CLAIM`.
+          `TERMINAL_PROCESSING` is D-04-derived only after D-03/Gate/I-03. `CLOSE` is not authorized.
+          EOF
+          cat > "$root/APPLY.sh" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          BASE=b5551eddbbcd82675997c740b5471bb3cc74241b
+          here="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"; repo="${1:-$PWD}"; cd "$repo"
+          test "$(git rev-parse HEAD)" = "$BASE" || { echo "STOP: exact base required: $BASE" >&2; exit 2; }
+          while IFS= read -r f; do mkdir -p "$(dirname "$f")"; cp "$here/overlay/$f" "$f"; done < "$here/ADMITTED_OVERLAY_FILES.txt"
+          echo 'PASS: bounded CODEX055 overlay applied.'
+          EOF
+          chmod +x "$root/APPLY.sh"
+          cat > "$root/VERIFY_AFTER_APPLY.sh" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          here="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"; repo="${1:-$PWD}"; cd "$repo"
+          while read -r d f; do printf '%s  %s\n' "$d" "$f" | sha256sum -c -; done < "$here/OVERLAY_SHA256SUMS.txt"
+          while read -r d f; do printf '%s  %s\n' "$d" "$f" | sha256sum -c -; done < "$here/PROTECTED_SOURCE_SHA256SUMS.txt"
+          echo 'PASS: overlay and protected identities verified.'
+          EOF
+          chmod +x "$root/VERIFY_AFTER_APPLY.sh"
+          cat > "$root/APPLY_AND_VERIFY.md" <<EOF
+          # Apply and Verify
+          Exact base: \`$BASE\`. Frozen verified source: \`$SRC\`.
+          Run \`APPLY.sh\` then \`VERIFY_AFTER_APPLY.sh\` from an exact-base DT worktree. In \`$W\`, run \`npm ci\`, architecture boundaries, typecheck, build and relevant regressions. Use unchanged V001–V004/current grant-runtime on disposable PostgreSQL 17. Apply Day-1/Day-2 Trial seeds only as migration identity. Run the included governed producer proof. Do not merge verification PRs or mutate Build Pack.
+          EOF
+          cat > "$root/RESET_RESEED_RERUN.md" <<'EOF'
+          # Reset / Reseed / Rerun
+          Recreate a disposable non-production DB from unchanged V001–V004, apply current accepted runtime grants, then Day-1 and Day-2 static seeds as migration identity. Seeds must reject `appts_runtime`. Form a fresh governed Day-1 Ticket and ACTIVATE before Day-2. Use a distinct `scenarioRunRef` for reruns. Never advance canonical lifecycle state by direct SQL.
+          EOF
+          cat > "$root/PRODUCER_VERIFICATION_SUMMARY.md" <<EOF
+          # Producer Verification
+          Source \`$SRC\`.
+          Regular verification: run \`32635151836\` SUCCESS.
+          Runtime/browser verification: run \`32635151795\`, job \`97183663391\` SUCCESS.
+          Runtime evidence artifact \`9492109837\`, digest \`sha256:42ccaf1e67b00a73c7c48b176f9ade2202c44cc31379e536ceba617be478afb6\`.
+          Toolchain: Node 24.19.0; npm 11.17.0; PostgreSQL 17.11; Google Chrome 151.0.7922.137.
+          PASS: provisional event stays ACTIVE; wrong verifier fail-closed; valid independent verifier; terminal claim only after predicates; D-03/Gate/I-03 → D-04 ACTIVE→TERMINAL_PROCESSING; no CLOSE; replay no duplicate effect; distinct rerun scenario_run_ref; actual browser surfaces; zero CLOSED Tickets.
+          EOF
+          python3 - "$root" "$BASE" "$SRC" <<'PY'
+          import json,pathlib,sys
+          r=pathlib.Path(sys.argv[1]); m={'package':'CODEX055_DT_TRANSFER_v1.0_CONTROLLED','authority':'MCR-to-CODEX-055','upstream':'ARC-to-MCR-001','base_sha':sys.argv[2],'source_sha':sys.argv[3],'scenario':'TLS-D2-RS-SCN-01','overlay_files':r.joinpath('ADMITTED_OVERLAY_FILES.txt').read_text().splitlines(),'regular_verification_run':32635151836,'runtime_verification_run':32635151795,'runtime_job':97183663391,'runtime_evidence_artifact':9492109837,'runtime_evidence_digest':'sha256:42ccaf1e67b00a73c7c48b176f9ade2202c44cc31379e536ceba617be478afb6','build_pack':'FROZEN_UNCHANGED','close_action':'WITHHELD_NOT_AUTHORIZED'}; r.joinpath('MANIFEST.json').write_text(json.dumps(m,indent=2)+'\n')
+          PY
+          (cd "$root" && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+          (cd "$tmp" && zip -X -r "$N.zip" "$N" >/dev/null)
+          sha256sum "$tmp/$N.zip" | tee /tmp/transfer.sha
+          stat -c '%s' "$tmp/$N.zip" | tee /tmp/transfer.size
+          cp "$tmp/$N.zip" "$GITHUB_WORKSPACE/$N.zip"
+          echo "TRANSFER_SOURCE=$SRC"; echo "TRANSFER_OVERLAY_COUNT=$(wc -l < /tmp/codex055-files)"; echo "TRANSFER_SHA256=$(cut -d' ' -f1 /tmp/transfer.sha)"; echo "TRANSFER_SIZE=$(cat /tmp/transfer.size)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CODEX055_DT_TRANSFER_v1.0_CONTROLLED
+          path: CODEX055_DT_TRANSFER_v1.0_CONTROLLED.zip
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
