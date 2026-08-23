@@ -34,13 +34,21 @@ function statusFor(code: string): number {
   return 500;
 }
 function sendFailure(reply: FastifyReply, error: unknown): FastifyReply { const code = errorCode(error); return reply.code(statusFor(code)).header("Cache-Control", "no-store").send({ error: code }); }
-async function projection(reply: FastifyReply, composition: ApiComposition, viewId: string, context:UiReadContext, subjectRef?: string, concern?: string): Promise<unknown> { try { return await readUiProjection(composition.projections, viewId, subjectRef, concern, context); } catch (error) { return sendFailure(reply, error); } }
+function bindTicketContextVersion(value:unknown,viewId:string):unknown{
+  if(viewId!=="UX-RS-03"||typeof value!=="object"||value===null)return value;
+  const envelope=value as Readonly<Record<string,unknown>>;const data=envelope["data"];
+  if(typeof data!=="object"||data===null)return value;
+  const record=data as Readonly<Record<string,unknown>>;const ticketId=record["ticket_id"];const aggregate=record["aggregate_version"];const contextVersion=record["current_context_version"];
+  if(typeof ticketId!=="string"||typeof aggregate!=="number"||typeof contextVersion!=="number")return value;
+  return Object.freeze({...envelope,source_version_set_ref:`runtime_ticket:${ticketId}:${aggregate}:context:${contextVersion}`});
+}
+async function projection(reply: FastifyReply, composition: ApiComposition, viewId: string, context:UiReadContext, subjectRef?: string, concern?: string): Promise<unknown> { try { return bindTicketContextVersion(await readUiProjection(composition.projections, viewId, subjectRef, concern, context),viewId); } catch (error) { return sendFailure(reply, error); } }
 
 export function registerUiHttpRoutes(app: FastifyInstance, composition: ApiComposition, auth:TlsDay3TrialAuth): void {
   app.get(`${UI_PREFIX}/work-queue`, async (request, reply) => {try{return projection(reply,composition,"UX-RS-01",asReadContext(auth.requireProduct(request)));}catch(error){return sendFailure(reply,error);}});
   app.get(`${UI_PREFIX}/intake`, async (request, reply) => {try{return projection(reply,composition,"UX-RS-02",asReadContext(auth.requireProduct(request)));}catch(error){return sendFailure(reply,error);}});
   app.get(`${UI_PREFIX}/intake/:caseId`, async (request, reply) => {try{return projection(reply,composition,"UX-RS-02",asReadContext(auth.requireProduct(request)),routeParam(request,"caseId"));}catch(error){return sendFailure(reply,error);}});
-  app.get(`${UI_PREFIX}/tickets/:ticketId`, async (request, reply) => {try{return projection(reply,composition,"UX-RS-03",asReadContext(auth.require(request)),routeParam(request,"ticketId"));}catch(error){return sendFailure(reply,error);}});
+  app.get(`${UI_PREFIX}/tickets/:ticketId`, async (request, reply) => {try{return projection(reply,composition,"UX-RS-03",asReadContext(auth.requireProduct(request)),routeParam(request,"ticketId"));}catch(error){return sendFailure(reply,error);}});
   app.get(`${UI_PREFIX}/tickets/:ticketId/concerns/:concern`, async (request, reply) => {try{const session=auth.requireProduct(request);const concern=routeParam(request,"concern");if(concern===undefined||!(concern in concernViews))return sendFailure(reply,new Error("UI_CONCERN_NOT_FOUND"));const viewId=concernViews[concern as keyof typeof concernViews];return projection(reply,composition,viewId,asReadContext(session),routeParam(request,"ticketId"),concern);}catch(error){return sendFailure(reply,error);}});
   app.get(`${UI_PREFIX}/incidents/:incidentId`, async (request, reply) => {try{return projection(reply,composition,"UX-RS-09",asReadContext(auth.requireProduct(request)),routeParam(request,"incidentId"),"incident");}catch(error){return sendFailure(reply,error);}});
   app.get(`${UI_PREFIX}/control`, async (request, reply) => {try{return projection(reply,composition,"UX-RS-13",asReadContext(auth.requireProduct(request)));}catch(error){return sendFailure(reply,error);}});
