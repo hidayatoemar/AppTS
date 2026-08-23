@@ -27,6 +27,7 @@ COPY apps/web apps/web
 COPY packages/config packages/config
 COPY packages/contracts packages/contracts
 COPY packages/core-d01 packages/core-d01
+COPY packages/core-d03 packages/core-d03
 COPY packages/observability packages/observability
 COPY packages/persistence packages/persistence
 COPY packages/runtime-d04 packages/runtime-d04
@@ -65,6 +66,7 @@ COPY --from=build /workspace/apps/web/dist ./apps/web/dist
 COPY --from=build /workspace/packages/config/dist ./packages/config/dist
 COPY --from=build /workspace/packages/contracts/dist ./packages/contracts/dist
 COPY --from=build /workspace/packages/core-d01/dist ./packages/core-d01/dist
+COPY --from=build /workspace/packages/core-d03/dist ./packages/core-d03/dist
 COPY --from=build /workspace/packages/observability/dist ./packages/observability/dist
 COPY --from=build /workspace/packages/persistence/dist ./packages/persistence/dist
 COPY --from=build /workspace/packages/runtime-d04/dist ./packages/runtime-d04/dist
