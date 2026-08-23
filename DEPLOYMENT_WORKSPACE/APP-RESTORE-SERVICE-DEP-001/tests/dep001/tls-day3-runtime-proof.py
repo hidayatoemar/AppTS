@@ -120,7 +120,7 @@ wrong=a.intent(ACTION,action(ticket,VERIFY,requested)); assert wrong['result']==
 # B authenticates independently and receives only B's currently authorized verification action.
 b=Client(); b.login('trial.verify.b'); bview=b.get('/tickets/'+ticket); assert bview['data']['available_actions']==[VERIFY],bview
 verified=b.intent(ACTION,action(ticket,VERIFY,bview)); assert verified['result']=='ACK' and verified['verificationResult']=='VERIFIED' and verified['terminalClaimAvailable'] is True,verified
-bevidence=b.get('/tickets/'+ticket+'/concerns/evidence'); assert bevidence['data']['truth_posture']=='INDEPENDENTLY_VERIFIED' and bevidence['data']['verifier_ref']==B_HOLDER,bevidence
+bevidence=a.get('/tickets/'+ticket+'/concerns/evidence'); assert bevidence['data']['truth_posture']=='INDEPENDENTLY_VERIFIED' and bevidence['data']['verifier_ref']==B_HOLDER,bevidence
 
 # C receives terminal-disposition authority only after valid independent verification.
 c=Client(); c.login('trial.disp.c'); cview=c.get('/tickets/'+ticket); assert cview['data']['available_actions']==[TERM],cview
