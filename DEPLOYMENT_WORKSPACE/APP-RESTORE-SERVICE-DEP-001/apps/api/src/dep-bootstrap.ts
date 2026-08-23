@@ -9,6 +9,7 @@ import { createLogger, type Logger } from "@appts-restore-service/observability"
 import { composeApi, type ApiComposition } from "./composition.ts";
 import { createTrialProjectionPort } from "./projections/trial-projection-port.ts";
 import { registerTlsDay3AuthRoutes } from "./routes/trial-auth-http.ts";
+import { registerTlsDay3EndShiftRoute } from "./routes/trial-end-shift-http.ts";
 import { registerUiHttpRoutes } from "./routes/ui-http.ts";
 import { createTrialPreTicketIntentDispatcher } from "./trial/pre-ticket-trial-owner-flow.ts";
 import { createTlsDay1GoldenDispatcher } from "./trial/tls-day1-golden-flow.ts";
@@ -58,15 +59,11 @@ export async function createDepBootstrapServer(options: DepBootstrapOptions = {}
   const fallbackIntents = pool === undefined ? undefined : createTrialPreTicketIntentDispatcher(pool);
   const day1Intents = pool === undefined ? undefined : createTlsDay1GoldenDispatcher(pool, fallbackIntents!);
   const day2Intents = pool === undefined ? undefined : createTlsDay2Arc001Dispatcher(pool, day1Intents!);
-  const composition = options.composition ?? composeApi({
-    projections: createTrialProjectionPort(pool!),
-    intents: createTlsDay3Arc002Dispatcher(pool!, day2Intents!),
-    diagnostics: Object.freeze({ async retrieve(): Promise<never> { throw new Error("DIAGNOSTIC_AUTHORITY_BINDING_REQUIRED"); } }),
-  });
+  const composition = options.composition ?? composeApi({ projections: createTrialProjectionPort(pool!), intents: createTlsDay3Arc002Dispatcher(pool!, day2Intents!), diagnostics: Object.freeze({ async retrieve(): Promise<never> { throw new Error("DIAGNOSTIC_AUTHORITY_BINDING_REQUIRED"); } }) });
   if(pool!==undefined&&options.composition===undefined)await prepareExistingTlsDay3Closures(pool);
   const app = fastify({ logger: false });
   await app.register(fastifyStatic, { root: staticRoot, serve: false, wildcard: false, index: false, redirect: false });
-  registerTlsDay3AuthRoutes(app,auth);registerUiHttpRoutes(app, composition,auth); registerDeploymentRoutes(app,auth);
+  registerTlsDay3AuthRoutes(app,auth);if(pool!==undefined)registerTlsDay3EndShiftRoute(app,pool,auth);registerUiHttpRoutes(app, composition,auth);registerDeploymentRoutes(app,auth);
   const close = async (): Promise<void> => { await app.close(); if (ownedPool !== undefined) await ownedPool.end(); logger.info("DEP API stopped"); };
   logger.info({ port: config.apiPort, staticBootstrap: "ready", uiComposition: "registered", trialAuthAliasesConfigured:auth.configuredAliases.length }, "DEP API prepared");
   return Object.freeze({ app, config, staticRoot, composition, close });
