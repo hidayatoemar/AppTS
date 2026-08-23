@@ -29,6 +29,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Bind exact accepted Node and npm toolchain
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.19.0'
+      - name: Bind exact accepted npm
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.17.0
+          test "$(node --version)" = 'v24.19.0'
+          test "$(npm --version)" = '11.17.0'
+          echo 'TOOLCHAIN_BINDING=PASS' >> "$GITHUB_ENV"
+
       - name: Validate MCR-to-DT-016 request token and harness syntax
         shell: bash
         run: |
@@ -108,6 +121,7 @@ jobs:
           run_id: ${GITHUB_RUN_ID}
           trigger_commit: ${GITHUB_SHA}
           job_status: ${{ job.status }}
+          toolchain_binding: ${TOOLCHAIN_BINDING:-NOT_REACHED}
           request_validation: ${REQUEST_VALIDATION:-NOT_REACHED}
           syntax_check: ${SYNTAX_CHECK:-NOT_REACHED}
           secret_bindings: ${SECRET_BINDINGS:-NOT_REACHED}
