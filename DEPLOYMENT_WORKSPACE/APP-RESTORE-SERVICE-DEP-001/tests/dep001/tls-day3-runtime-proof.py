@@ -77,7 +77,7 @@ if os.environ.get('CODEX058_PHASE')=='restart': restart_phase(); raise SystemExi
 # D3-01 unauthenticated governed/API surfaces fail closed and SPA routes redirect to Login.
 status,body,_=raw_request(UI+'/work-queue'); assert status==401,(status,body)
 no_redirect=urllib.request.build_opener(NoRedirect())
-status,_,headers=raw_request(ROOT+'/work',opener=no_redirect); assert status in (302,303,307,308) and headers.get('Location')=='/login',(status,headers)
+status,_,headers=raw_request(ROOT+'/work',opener=no_redirect); location=next((v for k,v in headers.items() if k.lower()=='location'),None); assert status in (302,303,307,308) and location=='/login',(status,headers)
 
 # D3-02 invalid credentials denied; D3-03 exact alias mappings resolve through server binding check.
 bad=Client(); status,_,_=raw_request(AUTH+'/login','POST',{'alias':'trial.ops.a','credential':str(uuid.uuid4())},bad.opener); assert status==401,status
