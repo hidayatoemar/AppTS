@@ -32,7 +32,8 @@ def raw_request(url,method='GET',body=None,opener=None):
     data=None if body is None else json.dumps(body).encode()
     req=urllib.request.Request(url,data=data,headers={'content-type':'application/json'} if body is not None else {},method=method)
     try:
-        with (opener or urllib.request).open(req,timeout=30) as r:
+        open_fn=opener.open if opener is not None else urllib.request.urlopen
+        with open_fn(req,timeout=30) as r:
             raw=r.read().decode(); return r.status,json.loads(raw) if raw and raw.lstrip().startswith(('{','[')) else raw,dict(r.headers)
     except urllib.error.HTTPError as e:
         raw=e.read().decode(errors='replace')
