@@ -65,7 +65,7 @@ export function createTlsDay3TrialAuth(env:Readonly<Record<string,string|undefin
       if(!isAlias(aliasValue)||typeof secretValue!=="string"||secretValue.length===0)throw new Error("TLS_DAY3_INVALID_CREDENTIAL");
       const encoded=registry.get(aliasValue);if(!encoded||!verifyCredential(secretValue,encoded))throw new Error("TLS_DAY3_INVALID_CREDENTIAL");
       const existing=current(request);if(existing)sessions.delete(existing.session_ref);
-      const sessionRef=randomBytes(32).toString("base64url");const actor=ACTORS[aliasValue];const session:Object.freeze<TlsDay3SessionContext>=Object.freeze({...actor,session_ref:sessionRef,established_at:new Date().toISOString()});sessions.set(sessionRef,session);cookieValue(reply,sessionRef,secure);return session;
+      const sessionRef=randomBytes(32).toString("base64url");const actor=ACTORS[aliasValue];const session:TlsDay3SessionContext=Object.freeze({...actor,session_ref:sessionRef,established_at:new Date().toISOString()});sessions.set(sessionRef,session);cookieValue(reply,sessionRef,secure);return session;
     },
     current,
     require:requireSession,
