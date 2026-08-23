@@ -1,0 +1,132 @@
+name: DT TLS Day-2 resume verification
+
+on:
+  push:
+    branches:
+      - experiment/independent-restore-deploy
+    paths:
+      - INDEPENDENT_DEPLOYMENT/DAY2_RESUME_REQUEST
+
+permissions:
+  contents: write
+  statuses: write
+  actions: read
+
+concurrency:
+  group: dt-tls-day2-resume
+  cancel-in-progress: false
+
+jobs:
+  day2-resume:
+    if: github.ref == 'refs/heads/experiment/independent-restore-deploy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      INDEP_POSTGRES_PASSWORD: ${{ secrets.INDEP_POSTGRES_PASSWORD }}
+    steps:
+      - name: Checkout controlled DT branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bind exact accepted Node toolchain
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.19.0'
+
+      - name: Bind exact accepted npm
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.17.0
+          test "$(node --version)" = 'v24.19.0'
+          test "$(npm --version)" = '11.17.0'
+          echo 'TOOLCHAIN_BINDING=PASS' >> "$GITHUB_ENV"
+
+      - name: Validate resume request and harness syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f INDEPENDENT_DEPLOYMENT/DAY2_RESUME_REQUEST
+          test "$(tr -d '\r\n' < INDEPENDENT_DEPLOYMENT/DAY2_RESUME_REQUEST)" = 'MCR_TO_DT_016 DAY2_RESUME_AFTER_HARNESS_FIX'
+          bash -n INDEPENDENT_DEPLOYMENT/scripts/tls-day2-resume.sh
+          python3 -m py_compile INDEPENDENT_DEPLOYMENT/scripts/tls-day2-browser-proof.py
+          echo 'REQUEST_VALIDATION=PASS' >> "$GITHUB_ENV"
+          echo 'SYNTAX_CHECK=PASS' >> "$GITHUB_ENV"
+
+      - name: Validate target bindings
+        shell: bash
+        env:
+          INDEP_HOST: ${{ secrets.INDEP_HOST }}
+          INDEP_USER: ${{ secrets.INDEP_USER }}
+          INDEP_SSH_PRIVATE_KEY: ${{ secrets.INDEP_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$INDEP_HOST"
+          test -n "$INDEP_USER"
+          test -n "$INDEP_SSH_PRIVATE_KEY"
+          test -n "$INDEP_POSTGRES_PASSWORD"
+          echo 'SECRET_BINDINGS=PASS' >> "$GITHUB_ENV"
+
+      - name: Prepare ephemeral SSH
+        shell: bash
+        env:
+          INDEP_HOST: ${{ secrets.INDEP_HOST }}
+          INDEP_SSH_PRIVATE_KEY: ${{ secrets.INDEP_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$INDEP_SSH_PRIVATE_KEY" > ~/.ssh/independent_deploy_key
+          chmod 600 ~/.ssh/independent_deploy_key
+          ssh-keyscan -H "$INDEP_HOST" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          echo 'TARGET_BINDING_PREPARED=PASS' >> "$GITHUB_ENV"
+
+      - name: Execute bounded Day-2 resume verification
+        shell: bash
+        env:
+          INDEP_HOST: ${{ secrets.INDEP_HOST }}
+          INDEP_USER: ${{ secrets.INDEP_USER }}
+        run: |
+          set -euo pipefail
+          bash INDEPENDENT_DEPLOYMENT/scripts/tls-day2-resume.sh 2>&1 | tee INDEPENDENT_DEPLOYMENT/evidence/day2-resume-${GITHUB_RUN_ID}.txt
+          echo 'ACTION_EXECUTION=PASS' >> "$GITHUB_ENV"
+
+      - name: Upload Day-2 resume evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-restore-day2-resume-evidence-${{ github.run_id }}
+          path: INDEPENDENT_DEPLOYMENT/evidence/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish safe Day-2 resume pointer
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p INDEPENDENT_DEPLOYMENT/evidence
+          cat > INDEPENDENT_DEPLOYMENT/evidence/LAST_DAY2_RESUME_RUN.md <<EOF
+          # Independent Deployment Day-2 Resume Last Run
+
+          run_id: ${GITHUB_RUN_ID}
+          trigger_commit: ${GITHUB_SHA}
+          job_status: ${{ job.status }}
+          toolchain_binding: ${TOOLCHAIN_BINDING:-NOT_REACHED}
+          request_validation: ${REQUEST_VALIDATION:-NOT_REACHED}
+          syntax_check: ${SYNTAX_CHECK:-NOT_REACHED}
+          secret_bindings: ${SECRET_BINDINGS:-NOT_REACHED}
+          target_binding_prepared: ${TARGET_BINDING_PREPARED:-NOT_REACHED}
+          action_execution: ${ACTION_EXECUTION:-NOT_REACHED}
+          recorded_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          No secret values are written to this evidence file.
+          EOF
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- INDEPENDENT_DEPLOYMENT/evidence/LAST_DAY2_RESUME_RUN.md
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'chore(experiment): record Day-2 resume evidence'
+          git push origin HEAD:refs/heads/experiment/independent-restore-deploy
