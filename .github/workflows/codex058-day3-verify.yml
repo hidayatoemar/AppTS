@@ -1,9 +1,10 @@
 name: CODEX058 Day-3 ARC002 verification
 on:
   pull_request:
-    branches: [experiment/independent-restore-deploy]
+    branches: [experiment/independent-restore-deploy, verification/codex058-ci-anchor]
     paths:
       - '.github/workflows/codex058-day3-verify.yml'
+      - '.github/CODEX058_VERIFY_TRIGGER'
       - 'DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/**'
 permissions:
   contents: read
@@ -52,10 +53,12 @@ jobs:
           grep -Fq 'scryptSync' apps/api/src/trial/tls-day3-auth.ts
           grep -Fq 'HttpOnly' apps/api/src/trial/tls-day3-auth.ts
           grep -Fq 'TLS_DAY3_CLIENT_ACTOR_TAMPER_DENIED' apps/api/src/trial/tls-day3-auth.ts
+          grep -Fq 'TLS_DAY3_PRODUCT_BINDING_NOT_CURRENT' apps/api/src/routes/trial-auth-http.ts
           grep -Fq 'TRIAL-TRAINER-CONTROL-01' apps/api/src/trial/tls-day3-auth.ts
           grep -Fq 'RS_TRIAL_REQUEST_TICKET_CLOSURE' apps/api/src/trial/tls-day3-arc002-flow.ts
           grep -Fq 'CLOSURE_CLAIM' apps/api/src/trial/tls-day3-arc002-flow.ts
           grep -Fq 'targetState:"CLOSED"' apps/api/src/trial/tls-day3-arc002-flow.ts
+          grep -Fq 'product_authority:false' apps/api/src/routes/trial-trainer-http.ts
           ! grep -R -E 'SET_CLOSED|FORCE_CLOSE|requested_action_class[^;]*REOPEN|action_class_ref[^;]*REOPEN|targetState:[[:space:]]*"ACTIVE"' apps/api/src/trial/tls-day3-arc002-flow.ts
           ! grep -R -E 'password\s*[:=]\s*["'"'][^"'"']+["'"']|credential\s*[:=]\s*["'"'][^"'"']+["'"']' apps/api/src apps/web/src --include='*.ts' --include='*.tsx'
       - name: Architecture boundary
