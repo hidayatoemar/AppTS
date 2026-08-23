@@ -2,6 +2,8 @@ name: CODEX055 DT transfer producer
 on:
   push:
     branches: [mcr/codex055-day2-arc001-candidate]
+  pull_request:
+    branches: [experiment/independent-restore-deploy]
 permissions:
   contents: read
 jobs:
