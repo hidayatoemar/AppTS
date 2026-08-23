@@ -8,7 +8,8 @@
     "rootDir": "src",
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.tsbuildinfo",
-    "sourceMap": true
+    "sourceMap": true,
+    "exactOptionalPropertyTypes": false
   },
   "include": [
     "src/**/*.ts"
