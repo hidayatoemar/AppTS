@@ -7,6 +7,7 @@ export const ROUTES = [
   ["/tickets/:ticketId/reconciliation", "UX-RS-10"], ["/tickets/:ticketId/closure", "UX-RS-11"],
   ["/tickets/:ticketId/closed", "UX-RS-12"], ["/tickets/:ticketId/history", "UX-RS-HISTORY"],
   ["/control", "UX-RS-13"], ["/executive", "UX-RS-14"], ["/diagnostics/:referenceId", "UX-RS-15"],
+  ["/trainer/tls-day2", "TLS-D2-TRAINER"],
 ] as const;
 export interface RouteMatch { readonly pattern: string; readonly viewId: string; readonly params: Readonly<Record<string,string>>; }
 export function resolveRoute(pathname: string): RouteMatch | { readonly redirect: "/work" } | { readonly notFound: true } {
