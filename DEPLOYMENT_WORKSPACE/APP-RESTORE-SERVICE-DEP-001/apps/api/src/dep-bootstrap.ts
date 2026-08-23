@@ -67,7 +67,7 @@ export async function createDepBootstrapServer(options: DepBootstrapOptions = {}
   if(pool!==undefined&&options.composition===undefined)await prepareExistingTlsDay3Closures(pool);
   const app = fastify({ logger: false });
   await app.register(fastifyStatic, { root: staticRoot, serve: false, wildcard: false, index: false, redirect: false });
-  registerTlsDay3AuthRoutes(app,auth,pool);if(pool!==undefined){registerTlsDay3EndShiftRoute(app,pool,auth);registerTlsDay3TrainerRoutes(app,pool,auth);}registerUiHttpRoutes(app, composition,auth);registerDeploymentRoutes(app,auth);
+  registerTlsDay3AuthRoutes(app,auth);if(pool!==undefined){registerTlsDay3EndShiftRoute(app,pool,auth);registerTlsDay3TrainerRoutes(app,pool,auth);}registerUiHttpRoutes(app, composition,auth);registerDeploymentRoutes(app,auth);
   const close = async (): Promise<void> => { await app.close(); if (ownedPool !== undefined) await ownedPool.end(); logger.info("DEP API stopped"); };
   logger.info({ port: config.apiPort, staticBootstrap: "ready", uiComposition: "registered", trialAuthAliasesConfigured:auth.configuredAliases.length }, "DEP API prepared");
   return Object.freeze({ app, config, staticRoot, composition, close });
