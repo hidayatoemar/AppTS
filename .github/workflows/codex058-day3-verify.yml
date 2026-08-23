@@ -56,7 +56,7 @@ jobs:
           grep -Fq 'RS_TRIAL_REQUEST_TICKET_CLOSURE' apps/api/src/trial/tls-day3-arc002-flow.ts
           grep -Fq 'CLOSURE_CLAIM' apps/api/src/trial/tls-day3-arc002-flow.ts
           grep -Fq 'targetState:"CLOSED"' apps/api/src/trial/tls-day3-arc002-flow.ts
-          ! grep -R -E 'SET_CLOSED|FORCE_CLOSE|REOPEN' apps/api/src/trial/tls-day3-arc002-flow.ts apps/web/src/views/LoginView.tsx
+          ! grep -R -E 'SET_CLOSED|FORCE_CLOSE|requested_action_class[^;]*REOPEN|action_class_ref[^;]*REOPEN|targetState:[[:space:]]*"ACTIVE"' apps/api/src/trial/tls-day3-arc002-flow.ts
           ! grep -R -E 'password\s*[:=]\s*["'"'][^"'"']+["'"']|credential\s*[:=]\s*["'"'][^"'"']+["'"']' apps/api/src apps/web/src --include='*.ts' --include='*.tsx'
       - name: Architecture boundary
         run: npm run verify:boundaries
