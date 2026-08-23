@@ -10,6 +10,7 @@ import { composeApi, type ApiComposition } from "./composition.ts";
 import { createTrialProjectionPort } from "./projections/trial-projection-port.ts";
 import { registerTlsDay3AuthRoutes } from "./routes/trial-auth-http.ts";
 import { registerTlsDay3EndShiftRoute } from "./routes/trial-end-shift-http.ts";
+import { registerTlsDay3TrainerRoutes } from "./routes/trial-trainer-http.ts";
 import { registerUiHttpRoutes } from "./routes/ui-http.ts";
 import { createTrialPreTicketIntentDispatcher } from "./trial/pre-ticket-trial-owner-flow.ts";
 import { createTlsDay1GoldenDispatcher } from "./trial/tls-day1-golden-flow.ts";
@@ -63,7 +64,7 @@ export async function createDepBootstrapServer(options: DepBootstrapOptions = {}
   if(pool!==undefined&&options.composition===undefined)await prepareExistingTlsDay3Closures(pool);
   const app = fastify({ logger: false });
   await app.register(fastifyStatic, { root: staticRoot, serve: false, wildcard: false, index: false, redirect: false });
-  registerTlsDay3AuthRoutes(app,auth,pool);if(pool!==undefined)registerTlsDay3EndShiftRoute(app,pool,auth);registerUiHttpRoutes(app, composition,auth);registerDeploymentRoutes(app,auth);
+  registerTlsDay3AuthRoutes(app,auth,pool);if(pool!==undefined){registerTlsDay3EndShiftRoute(app,pool,auth);registerTlsDay3TrainerRoutes(app,pool,auth);}registerUiHttpRoutes(app, composition,auth);registerDeploymentRoutes(app,auth);
   const close = async (): Promise<void> => { await app.close(); if (ownedPool !== undefined) await ownedPool.end(); logger.info("DEP API stopped"); };
   logger.info({ port: config.apiPort, staticBootstrap: "ready", uiComposition: "registered", trialAuthAliasesConfigured:auth.configuredAliases.length }, "DEP API prepared");
   return Object.freeze({ app, config, staticRoot, composition, close });
