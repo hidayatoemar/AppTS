@@ -17,6 +17,7 @@ import { createTlsDay1GoldenDispatcher } from "./trial/tls-day1-golden-flow.ts";
 import { createTlsDay2Arc001Dispatcher } from "./trial/tls-day2-arc001-flow.ts";
 import { createTlsDay3Arc002Dispatcher, prepareExistingTlsDay3Closures } from "./trial/tls-day3-arc002-flow.ts";
 import { createTlsDay3TrialAuth, type TlsDay3TrialAuth } from "./trial/tls-day3-auth.ts";
+import { createTlsDay3TrainerReseedDispatcher } from "./trial/tls-day3-trainer-reseed.ts";
 
 const DEP_COMPONENT = "api-dep001";
 const SERVICE_WORKER_PATH = "/service-worker.js";
@@ -60,7 +61,9 @@ export async function createDepBootstrapServer(options: DepBootstrapOptions = {}
   const fallbackIntents = pool === undefined ? undefined : createTrialPreTicketIntentDispatcher(pool);
   const day1Intents = pool === undefined ? undefined : createTlsDay1GoldenDispatcher(pool, fallbackIntents!);
   const day2Intents = pool === undefined ? undefined : createTlsDay2Arc001Dispatcher(pool, day1Intents!);
-  const composition = options.composition ?? composeApi({ projections: createTrialProjectionPort(pool!), intents: createTlsDay3Arc002Dispatcher(pool!, day2Intents!), diagnostics: Object.freeze({ async retrieve(): Promise<never> { throw new Error("DIAGNOSTIC_AUTHORITY_BINDING_REQUIRED"); } }) });
+  const day3Intents = pool === undefined ? undefined : createTlsDay3Arc002Dispatcher(pool, day2Intents!);
+  const trainerIntents = pool === undefined ? undefined : createTlsDay3TrainerReseedDispatcher(day3Intents!);
+  const composition = options.composition ?? composeApi({ projections: createTrialProjectionPort(pool!), intents: trainerIntents!, diagnostics: Object.freeze({ async retrieve(): Promise<never> { throw new Error("DIAGNOSTIC_AUTHORITY_BINDING_REQUIRED"); } }) });
   if(pool!==undefined&&options.composition===undefined)await prepareExistingTlsDay3Closures(pool);
   const app = fastify({ logger: false });
   await app.register(fastifyStatic, { root: staticRoot, serve: false, wildcard: false, index: false, redirect: false });
