@@ -25,6 +25,9 @@
       "path": "../../packages/core-d01"
     },
     {
+      "path": "../../packages/core-d03"
+    },
+    {
       "path": "../../packages/runtime-d04"
     },
     {
