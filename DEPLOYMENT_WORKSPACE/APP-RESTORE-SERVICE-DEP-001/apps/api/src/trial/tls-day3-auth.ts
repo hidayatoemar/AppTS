@@ -9,10 +9,14 @@ export const TLS_DAY3_ALIASES = Object.freeze([
   "trial.trainer.1",
 ] as const);
 export type TlsDay3Alias = typeof TLS_DAY3_ALIASES[number];
+export const TLS_DAY3_TRIAL_BINDING_AUTHORITY = "ARC-to-MCR-002" as const;
+export const TLS_DAY3_TRIAL_BINDING_CURRENTNESS = "CURRENT" as const;
 
 export interface TlsDay3ActorContext {
   readonly alias: TlsDay3Alias;
   readonly trainerOnly: boolean;
+  readonly binding_authority_ref: typeof TLS_DAY3_TRIAL_BINDING_AUTHORITY;
+  readonly binding_currentness: typeof TLS_DAY3_TRIAL_BINDING_CURRENTNESS;
   readonly actor_ref?: string;
   readonly role_assignment_ref?: string;
   readonly role_instance_ref?: string;
@@ -22,12 +26,13 @@ export interface TlsDay3ActorContext {
 }
 export interface TlsDay3SessionContext extends TlsDay3ActorContext { readonly session_ref: string; readonly established_at: string; }
 
+const CONTROLLED = Object.freeze({ binding_authority_ref:TLS_DAY3_TRIAL_BINDING_AUTHORITY, binding_currentness:TLS_DAY3_TRIAL_BINDING_CURRENTNESS });
 const ACTORS: Readonly<Record<TlsDay3Alias, TlsDay3ActorContext>> = Object.freeze({
-  "trial.ops.a": Object.freeze({ alias:"trial.ops.a", trainerOnly:false, actor_ref:"51010000-0000-4000-8000-00000000000a", role_assignment_ref:"51010000-0000-4000-8000-00000000000b", role_instance_ref:"51010000-0000-4000-8000-000000000009", assignment_snapshot_ref:"51010000-0000-4000-8000-000000000006", role_ref:"TRIAL-RS-RESPONSIBLE-ROLE-01", holder_ref:"TRIAL-HOLDER-OPS-A" }),
-  "trial.verify.b": Object.freeze({ alias:"trial.verify.b", trainerOnly:false, actor_ref:"52010000-0000-4000-8000-000000000012", role_assignment_ref:"52010000-0000-4000-8000-000000000013", role_instance_ref:"52010000-0000-4000-8000-000000000011", assignment_snapshot_ref:"52010000-0000-4000-8000-000000000014", role_ref:"TRIAL-RS-VERIFICATION-ROLE-01", holder_ref:"TRIAL-HOLDER-VERIFY-B" }),
-  "trial.disp.c": Object.freeze({ alias:"trial.disp.c", trainerOnly:false, actor_ref:"52010000-0000-4000-8000-000000000022", role_assignment_ref:"52010000-0000-4000-8000-000000000023", role_instance_ref:"52010000-0000-4000-8000-000000000021", assignment_snapshot_ref:"52010000-0000-4000-8000-000000000024", role_ref:"TRIAL-RS-TERMINAL-DISPOSITION-ROLE-01", holder_ref:"TRIAL-HOLDER-DISP-C" }),
-  "trial.close.d": Object.freeze({ alias:"trial.close.d", trainerOnly:false, actor_ref:"52010000-0000-4000-8000-000000000032", role_assignment_ref:"52010000-0000-4000-8000-000000000033", role_instance_ref:"52010000-0000-4000-8000-000000000031", assignment_snapshot_ref:"52010000-0000-4000-8000-000000000034", role_ref:"TRIAL-RS-CLOSURE-AUTHORITY-ROLE-01", holder_ref:"TRIAL-HOLDER-CLOSE-D" }),
-  "trial.trainer.1": Object.freeze({ alias:"trial.trainer.1", trainerOnly:true, role_ref:"TRIAL-TRAINER-CONTROL-01", holder_ref:"TRIAL-TRAINER-CONTROL-01" }),
+  "trial.ops.a": Object.freeze({ ...CONTROLLED, alias:"trial.ops.a", trainerOnly:false, actor_ref:"51010000-0000-4000-8000-00000000000a", role_assignment_ref:"51010000-0000-4000-8000-00000000000b", role_instance_ref:"51010000-0000-4000-8000-000000000009", assignment_snapshot_ref:"51010000-0000-4000-8000-000000000006", role_ref:"TRIAL-RS-RESPONSIBLE-ROLE-01", holder_ref:"TRIAL-HOLDER-OPS-A" }),
+  "trial.verify.b": Object.freeze({ ...CONTROLLED, alias:"trial.verify.b", trainerOnly:false, actor_ref:"52010000-0000-4000-8000-000000000012", role_assignment_ref:"52010000-0000-4000-8000-000000000013", role_instance_ref:"52010000-0000-4000-8000-000000000011", assignment_snapshot_ref:"52010000-0000-4000-8000-000000000014", role_ref:"TRIAL-RS-VERIFICATION-ROLE-01", holder_ref:"TRIAL-HOLDER-VERIFY-B" }),
+  "trial.disp.c": Object.freeze({ ...CONTROLLED, alias:"trial.disp.c", trainerOnly:false, actor_ref:"52010000-0000-4000-8000-000000000022", role_assignment_ref:"52010000-0000-4000-8000-000000000023", role_instance_ref:"52010000-0000-4000-8000-000000000021", assignment_snapshot_ref:"52010000-0000-4000-8000-000000000024", role_ref:"TRIAL-RS-TERMINAL-DISPOSITION-ROLE-01", holder_ref:"TRIAL-HOLDER-DISP-C" }),
+  "trial.close.d": Object.freeze({ ...CONTROLLED, alias:"trial.close.d", trainerOnly:false, actor_ref:"52010000-0000-4000-8000-000000000032", role_assignment_ref:"52010000-0000-4000-8000-000000000033", role_instance_ref:"52010000-0000-4000-8000-000000000031", assignment_snapshot_ref:"52010000-0000-4000-8000-000000000034", role_ref:"TRIAL-RS-CLOSURE-AUTHORITY-ROLE-01", holder_ref:"TRIAL-HOLDER-CLOSE-D" }),
+  "trial.trainer.1": Object.freeze({ ...CONTROLLED, alias:"trial.trainer.1", trainerOnly:true, role_ref:"TRIAL-TRAINER-CONTROL-01", holder_ref:"TRIAL-TRAINER-CONTROL-01" }),
 });
 
 const COOKIE = "appts_tls_trial_session";
@@ -43,6 +48,16 @@ export function hashTlsDay3Credential(secret:string,salt:Buffer=randomBytes(16))
 function verifyCredential(secret:string,encoded:string):boolean{const parsed=decodeCredentialHash(encoded);if(!parsed)return false;const candidate=scryptSync(secret,parsed.salt,parsed.hash.length);return candidate.length===parsed.hash.length&&timingSafeEqual(candidate,parsed.hash);}
 function cookieValue(reply:FastifyReply,sessionRef:string,secure:boolean):void{const attrs=[`${COOKIE}=${encodeURIComponent(sessionRef)}`,"Path=/","HttpOnly","SameSite=Strict",`Max-Age=${SESSION_MAX_AGE_SECONDS}`];if(secure)attrs.push("Secure");reply.header("Set-Cookie",attrs.join("; "));}
 function clearCookie(reply:FastifyReply,secure:boolean):void{const attrs=[`${COOKIE}=`,"Path=/","HttpOnly","SameSite=Strict","Max-Age=0"];if(secure)attrs.push("Secure");reply.header("Set-Cookie",attrs.join("; "));}
+function requireControlledBinding(actor:TlsDay3ActorContext):void{
+  if(actor.binding_authority_ref!==TLS_DAY3_TRIAL_BINDING_AUTHORITY||actor.binding_currentness!==TLS_DAY3_TRIAL_BINDING_CURRENTNESS)throw new Error("TLS_DAY3_TRIAL_BINDING_NOT_CURRENT");
+  if(actor.trainerOnly){if(actor.alias!=="trial.trainer.1"||actor.role_ref!=="TRIAL-TRAINER-CONTROL-01"||actor.holder_ref!=="TRIAL-TRAINER-CONTROL-01"||actor.actor_ref!==undefined||actor.role_assignment_ref!==undefined)throw new Error("TLS_DAY3_TRAINER_BINDING_INVALID");return;}
+  if(!actor.actor_ref||!actor.role_assignment_ref||!actor.role_instance_ref||!actor.assignment_snapshot_ref||!actor.role_ref||!actor.holder_ref)throw new Error("TLS_DAY3_PRODUCT_BINDING_INCOMPLETE");
+}
+function sessionStillMatchesControlledBinding(session:TlsDay3SessionContext):boolean{
+  const actor=ACTORS[session.alias];
+  try{requireControlledBinding(actor);}catch{return false;}
+  return actor.trainerOnly===session.trainerOnly&&actor.actor_ref===session.actor_ref&&actor.role_assignment_ref===session.role_assignment_ref&&actor.role_instance_ref===session.role_instance_ref&&actor.assignment_snapshot_ref===session.assignment_snapshot_ref&&actor.role_ref===session.role_ref&&actor.holder_ref===session.holder_ref&&actor.binding_authority_ref===session.binding_authority_ref&&actor.binding_currentness===session.binding_currentness;
+}
 
 export interface TlsDay3TrialAuth {
   readonly configuredAliases: readonly TlsDay3Alias[];
@@ -58,17 +73,19 @@ export interface TlsDay3TrialAuth {
 
 export function createTlsDay3TrialAuth(env:Readonly<Record<string,string|undefined>>=process.env):TlsDay3TrialAuth{
   const registry=parseCredentialRegistry(env[REGISTRY_ENV]);
+  for(const alias of registry.keys())requireControlledBinding(ACTORS[alias]);
   const secure=env[COOKIE_SECURE_ENV]?.toLowerCase()!=="false";
   const sessions=new Map<string,TlsDay3SessionContext>();
-  const current=(request:FastifyRequest):TlsDay3SessionContext|undefined=>{const ref=parseCookies(request.headers.cookie)[COOKIE];if(!ref)return undefined;return sessions.get(decodeURIComponent(ref));};
+  const current=(request:FastifyRequest):TlsDay3SessionContext|undefined=>{const ref=parseCookies(request.headers.cookie)[COOKIE];if(!ref)return undefined;const session=sessions.get(decodeURIComponent(ref));if(!session||!sessionStillMatchesControlledBinding(session))return undefined;return session;};
   const requireSession=(request:FastifyRequest):TlsDay3SessionContext=>{const session=current(request);if(!session)throw new Error("TLS_DAY3_AUTHENTICATION_REQUIRED");return session;};
   return Object.freeze({
     configuredAliases:Object.freeze([...registry.keys()]),
     login(aliasValue:unknown,secretValue:unknown,request:FastifyRequest,reply:FastifyReply):TlsDay3SessionContext{
       if(!isAlias(aliasValue)||typeof secretValue!=="string"||secretValue.length===0)throw new Error("TLS_DAY3_INVALID_CREDENTIAL");
       const encoded=registry.get(aliasValue);if(!encoded||!verifyCredential(secretValue,encoded))throw new Error("TLS_DAY3_INVALID_CREDENTIAL");
+      const actor=ACTORS[aliasValue];requireControlledBinding(actor);
       const existing=current(request);if(existing)sessions.delete(existing.session_ref);
-      const sessionRef=randomBytes(32).toString("base64url");const actor=ACTORS[aliasValue];const session:TlsDay3SessionContext=Object.freeze({...actor,session_ref:sessionRef,established_at:new Date().toISOString()});sessions.set(sessionRef,session);cookieValue(reply,sessionRef,secure);return session;
+      const sessionRef=randomBytes(32).toString("base64url");const session:TlsDay3SessionContext=Object.freeze({...actor,session_ref:sessionRef,established_at:new Date().toISOString()});sessions.set(sessionRef,session);cookieValue(reply,sessionRef,secure);return session;
     },
     current,
     require:requireSession,
