@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiComposition } from "../composition.ts";
 import { TLS_DAY2_TRAINER_INTENT } from "../trial/tls-day2-arc001-flow.ts";
 import type { TlsDay3SessionContext, TlsDay3TrialAuth } from "../trial/tls-day3-auth.ts";
+import { TLS_DAY3_TRAINER_RESEED_INTENT } from "../trial/tls-day3-trainer-reseed.ts";
 import { dispatchUiIntent } from "./ui-intents.ts";
 import { readUiProjection, type UiReadContext } from "./ui-read.ts";
 
@@ -59,7 +60,8 @@ export function registerUiHttpRoutes(app: FastifyInstance, composition: ApiCompo
     try {
       const body = typeof request.body === "object" && request.body !== null ? request.body as Readonly<Record<string, unknown>> : {};
       const contract=typeof body["intent_contract_ref"] === "string"?body["intent_contract_ref"]:undefined;
-      const payload=contract===TLS_DAY2_TRAINER_INTENT?(auth.requireTrainer(request),body["payload"]):auth.bindProductPayload(body["payload"],auth.requireProduct(request));
+      const trainerContract=contract===TLS_DAY2_TRAINER_INTENT||contract===TLS_DAY3_TRAINER_RESEED_INTENT;
+      const payload=trainerContract?(auth.requireTrainer(request),body["payload"]):auth.bindProductPayload(body["payload"],auth.requireProduct(request));
       const result = await dispatchUiIntent(composition.intents, { ...(contract?{intent_contract_ref:contract}:{}), payload });
       return reply.header("Cache-Control", "no-store").send(result);
     } catch (error) { return sendFailure(reply, error); }
