@@ -15,16 +15,18 @@ export interface TlsDay3ActorContext {
   readonly trainerOnly: boolean;
   readonly actor_ref?: string;
   readonly role_assignment_ref?: string;
+  readonly role_instance_ref?: string;
+  readonly assignment_snapshot_ref?: string;
   readonly role_ref?: string;
   readonly holder_ref?: string;
 }
 export interface TlsDay3SessionContext extends TlsDay3ActorContext { readonly session_ref: string; readonly established_at: string; }
 
 const ACTORS: Readonly<Record<TlsDay3Alias, TlsDay3ActorContext>> = Object.freeze({
-  "trial.ops.a": Object.freeze({ alias:"trial.ops.a", trainerOnly:false, actor_ref:"51010000-0000-4000-8000-00000000000a", role_assignment_ref:"51010000-0000-4000-8000-00000000000b", role_ref:"TRIAL-RS-RESPONSIBLE-ROLE-01", holder_ref:"TRIAL-HOLDER-OPS-A" }),
-  "trial.verify.b": Object.freeze({ alias:"trial.verify.b", trainerOnly:false, actor_ref:"52010000-0000-4000-8000-000000000012", role_assignment_ref:"52010000-0000-4000-8000-000000000013", role_ref:"TRIAL-RS-VERIFICATION-ROLE-01", holder_ref:"TRIAL-HOLDER-VERIFY-B" }),
-  "trial.disp.c": Object.freeze({ alias:"trial.disp.c", trainerOnly:false, actor_ref:"52010000-0000-4000-8000-000000000022", role_assignment_ref:"52010000-0000-4000-8000-000000000023", role_ref:"TRIAL-RS-TERMINAL-DISPOSITION-ROLE-01", holder_ref:"TRIAL-HOLDER-DISP-C" }),
-  "trial.close.d": Object.freeze({ alias:"trial.close.d", trainerOnly:false, actor_ref:"52010000-0000-4000-8000-000000000032", role_assignment_ref:"52010000-0000-4000-8000-000000000033", role_ref:"TRIAL-RS-CLOSURE-AUTHORITY-ROLE-01", holder_ref:"TRIAL-HOLDER-CLOSE-D" }),
+  "trial.ops.a": Object.freeze({ alias:"trial.ops.a", trainerOnly:false, actor_ref:"51010000-0000-4000-8000-00000000000a", role_assignment_ref:"51010000-0000-4000-8000-00000000000b", role_instance_ref:"51010000-0000-4000-8000-000000000009", assignment_snapshot_ref:"51010000-0000-4000-8000-000000000006", role_ref:"TRIAL-RS-RESPONSIBLE-ROLE-01", holder_ref:"TRIAL-HOLDER-OPS-A" }),
+  "trial.verify.b": Object.freeze({ alias:"trial.verify.b", trainerOnly:false, actor_ref:"52010000-0000-4000-8000-000000000012", role_assignment_ref:"52010000-0000-4000-8000-000000000013", role_instance_ref:"52010000-0000-4000-8000-000000000011", assignment_snapshot_ref:"52010000-0000-4000-8000-000000000014", role_ref:"TRIAL-RS-VERIFICATION-ROLE-01", holder_ref:"TRIAL-HOLDER-VERIFY-B" }),
+  "trial.disp.c": Object.freeze({ alias:"trial.disp.c", trainerOnly:false, actor_ref:"52010000-0000-4000-8000-000000000022", role_assignment_ref:"52010000-0000-4000-8000-000000000023", role_instance_ref:"52010000-0000-4000-8000-000000000021", assignment_snapshot_ref:"52010000-0000-4000-8000-000000000024", role_ref:"TRIAL-RS-TERMINAL-DISPOSITION-ROLE-01", holder_ref:"TRIAL-HOLDER-DISP-C" }),
+  "trial.close.d": Object.freeze({ alias:"trial.close.d", trainerOnly:false, actor_ref:"52010000-0000-4000-8000-000000000032", role_assignment_ref:"52010000-0000-4000-8000-000000000033", role_instance_ref:"52010000-0000-4000-8000-000000000031", assignment_snapshot_ref:"52010000-0000-4000-8000-000000000034", role_ref:"TRIAL-RS-CLOSURE-AUTHORITY-ROLE-01", holder_ref:"TRIAL-HOLDER-CLOSE-D" }),
   "trial.trainer.1": Object.freeze({ alias:"trial.trainer.1", trainerOnly:true, role_ref:"TRIAL-TRAINER-CONTROL-01", holder_ref:"TRIAL-TRAINER-CONTROL-01" }),
 });
 
@@ -49,6 +51,7 @@ export interface TlsDay3TrialAuth {
   require(request:FastifyRequest):TlsDay3SessionContext;
   requireProduct(request:FastifyRequest):TlsDay3SessionContext;
   requireTrainer(request:FastifyRequest):TlsDay3SessionContext;
+  invalidate(sessionRef:string,reply:FastifyReply):void;
   logout(request:FastifyRequest,reply:FastifyReply):void;
   bindProductPayload(payload:unknown,session:TlsDay3SessionContext):Readonly<Record<string,unknown>>;
 }
@@ -71,6 +74,7 @@ export function createTlsDay3TrialAuth(env:Readonly<Record<string,string|undefin
     require:requireSession,
     requireProduct(request:FastifyRequest):TlsDay3SessionContext{const session=requireSession(request);if(session.trainerOnly)throw new Error("TLS_DAY3_TRAINER_PRODUCT_AUTHORITY_DENIED");return session;},
     requireTrainer(request:FastifyRequest):TlsDay3SessionContext{const session=requireSession(request);if(!session.trainerOnly||session.alias!=="trial.trainer.1")throw new Error("TLS_DAY3_TRAINER_AUTHENTICATION_REQUIRED");return session;},
+    invalidate(sessionRef:string,reply:FastifyReply):void{sessions.delete(sessionRef);clearCookie(reply,secure);},
     logout(request:FastifyRequest,reply:FastifyReply):void{const session=current(request);if(session)sessions.delete(session.session_ref);clearCookie(reply,secure);},
     bindProductPayload(payload:unknown,session:TlsDay3SessionContext):Readonly<Record<string,unknown>>{
       if(session.trainerOnly||!session.actor_ref||!session.role_assignment_ref)throw new Error("TLS_DAY3_PRODUCT_CONTEXT_REQUIRED");
