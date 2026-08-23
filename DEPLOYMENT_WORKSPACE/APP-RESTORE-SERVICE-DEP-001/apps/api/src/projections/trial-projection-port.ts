@@ -10,6 +10,7 @@ interface TicketConsoleRow { readonly ticket_id:string; readonly current_state_c
 interface ActionSnapshotRow { readonly action_set_snapshot_id:string; readonly restriction_profile_ref:string|null; readonly action_class_ref:string|null; readonly availability_result_ref:string|null; readonly withholding_reason_ref:string|null; }
 interface RoleBinding { readonly actor_ref:string; readonly role_assignment_ref:string; readonly role_ref:string; readonly holder_ref:string; }
 const ROLE_BINDING:Readonly<Record<string,RoleBinding>>=Object.freeze({
+  ACTIVATE:Object.freeze({actor_ref:"51010000-0000-4000-8000-00000000000a",role_assignment_ref:"51010000-0000-4000-8000-00000000000b",role_ref:"TRIAL-RS-RESPONSIBLE-ROLE-01",holder_ref:"TRIAL-HOLDER-OPS-A"}),
   [TLS_DAY2_REQUEST_VERIFICATION]:Object.freeze({actor_ref:"51010000-0000-4000-8000-00000000000a",role_assignment_ref:"51010000-0000-4000-8000-00000000000b",role_ref:"TRIAL-RS-RESPONSIBLE-ROLE-01",holder_ref:"TRIAL-HOLDER-OPS-A"}),
   [TLS_DAY2_VERIFY_EVIDENCE]:Object.freeze({actor_ref:"52010000-0000-4000-8000-000000000012",role_assignment_ref:"52010000-0000-4000-8000-000000000013",role_ref:"TRIAL-RS-VERIFICATION-ROLE-01",holder_ref:"TRIAL-HOLDER-VERIFY-B"}),
   [TLS_DAY2_TERMINAL_CLAIM]:Object.freeze({actor_ref:"52010000-0000-4000-8000-000000000022",role_assignment_ref:"52010000-0000-4000-8000-000000000023",role_ref:"TRIAL-RS-TERMINAL-DISPOSITION-ROLE-01",holder_ref:"TRIAL-HOLDER-DISP-C"}),
