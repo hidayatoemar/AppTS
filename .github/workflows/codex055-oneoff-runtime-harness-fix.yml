@@ -1,0 +1,31 @@
+name: CODEX055 one-off runtime harness fixture fix
+on:
+  push:
+    branches: [mcr/codex055-day2-arc001-candidate]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mcr/codex055-day2-arc001-candidate
+      - shell: python
+        run: |
+          from pathlib import Path
+          p=Path('.github/workflows/codex055-day2-runtime-producer.yml')
+          s=p.read_text()
+          old="positive={'messageId':prefix+'0001','idempotencyKey':prefix+'0002','correlationId':prefix+'0003','trialContext':'TLS-DAY1-GOLDEN'}"
+          new="positive={'messageId':prefix+'000000000001','idempotencyKey':prefix+'000000000002','correlationId':prefix+'000000000003','trialContext':'TLS-DAY1-GOLDEN'}"
+          if old not in s and new not in s: raise SystemExit('fixture fragment not found')
+          p.write_text(s.replace(old,new))
+      - shell: bash
+        run: |
+          set -euo pipefail
+          git diff --quiet && exit 0
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/codex055-day2-runtime-producer.yml
+          git commit -m 'fix(codex055): use valid governed Day-1 UUID fixtures'
+          git push origin HEAD:mcr/codex055-day2-arc001-candidate
