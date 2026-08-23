@@ -61,6 +61,8 @@ jobs:
           npm run verify:boundaries
           npm run typecheck
           npm run build
+          npm run test:contracts
+          npm run test:adverse
 
       - name: Disposable PostgreSQL 17 least-privilege setup
         run: |
