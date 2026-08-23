@@ -1,0 +1,75 @@
+name: CODEX058 Day-3 ARC002 verification
+on:
+  pull_request:
+    branches: [experiment/independent-restore-deploy]
+    paths:
+      - '.github/workflows/codex058-day3-verify.yml'
+      - 'DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/**'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+    steps:
+      - name: Checkout Day-3 candidate
+        uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Set up Node 24.19.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/package-lock.json
+      - name: Pin npm 11.17.0
+        run: npm install --global npm@11.17.0
+      - name: Install exact dependencies
+        run: npm ci
+      - name: Preserve accepted Day-2 and security baseline
+        run: |
+          set -euo pipefail
+          base=741af578f1cab210d37dbb5f96877c6a09f62dd8
+          git diff --exit-code "$base" -- \
+            apps/api/src/trial/pre-ticket-trial-owner-flow.ts \
+            apps/api/src/trial/tls-day1-golden-flow.ts \
+            apps/api/src/trial/tls-day2-arc001-flow.ts \
+            deploy/db/seed-tls-day1-golden.sql \
+            deploy/db/seed-tls-day2-arc001.sql \
+            deploy/db/grant-runtime.sh \
+            db/migrations/V001__cf01_core_schema.sql \
+            db/migrations/V002__cf01_runtime_and_exchange_schema.sql \
+            db/migrations/V003__dg04_diagnostic_persistence.sql \
+            db/migrations/V004__d05_pending_capture_v2.sql \
+            package-lock.json
+          test -z "$(git diff --name-only "$base"...HEAD -- db/migrations deploy/db/grant-runtime.sh package-lock.json || true)"
+      - name: Day-3 static authority boundaries
+        run: |
+          set -euo pipefail
+          grep -Fq 'APPTS_TLS_TRIAL_CREDENTIAL_HASHES_JSON' apps/api/src/trial/tls-day3-auth.ts
+          grep -Fq 'scryptSync' apps/api/src/trial/tls-day3-auth.ts
+          grep -Fq 'HttpOnly' apps/api/src/trial/tls-day3-auth.ts
+          grep -Fq 'TLS_DAY3_CLIENT_ACTOR_TAMPER_DENIED' apps/api/src/trial/tls-day3-auth.ts
+          grep -Fq 'TRIAL-TRAINER-CONTROL-01' apps/api/src/trial/tls-day3-auth.ts
+          grep -Fq 'RS_TRIAL_REQUEST_TICKET_CLOSURE' apps/api/src/trial/tls-day3-arc002-flow.ts
+          grep -Fq 'CLOSURE_CLAIM' apps/api/src/trial/tls-day3-arc002-flow.ts
+          grep -Fq 'targetState:"CLOSED"' apps/api/src/trial/tls-day3-arc002-flow.ts
+          ! grep -R -E 'SET_CLOSED|FORCE_CLOSE|REOPEN' apps/api/src/trial/tls-day3-arc002-flow.ts apps/web/src/views/LoginView.tsx
+          ! grep -R -E 'password\s*[:=]\s*["'"'][^"'"']+["'"']|credential\s*[:=]\s*["'"'][^"'"']+["'"']' apps/api/src apps/web/src --include='*.ts' --include='*.tsx'
+      - name: Architecture boundary
+        run: npm run verify:boundaries
+      - name: Full typecheck
+        run: npm run typecheck
+      - name: Full build
+        run: npm run build
+      - name: Existing contract and adverse regression
+        run: |
+          set -euo pipefail
+          npm run test:contracts
+          npm run test:adverse
+      - name: Candidate delta report
+        run: |
+          set -euo pipefail
+          git diff --name-status 741af578f1cab210d37dbb5f96877c6a09f62dd8...HEAD
