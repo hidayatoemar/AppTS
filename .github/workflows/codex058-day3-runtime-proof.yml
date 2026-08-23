@@ -1,0 +1,238 @@
+name: CODEX058 Day-3 runtime and restart proof
+on:
+  pull_request:
+    branches:
+      - verification/codex058-runtime-anchor-v2
+    paths:
+      - '.github/workflows/codex058-day3-runtime-proof.yml'
+      - '.github/CODEX058_RUNTIME_TRIGGER'
+      - 'DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/**'
+permissions:
+  contents: read
+jobs:
+  day3-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    services:
+      postgres:
+        image: postgres:17.11-bookworm
+        env:
+          POSTGRES_PASSWORD: codex058-superuser-local-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        working-directory: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+    steps:
+      - name: Checkout Day-3 runtime candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node 24.19.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/package-lock.json
+
+      - name: Frozen source and build gate
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.17.0
+          npm ci
+          base=741af578f1cab210d37dbb5f96877c6a09f62dd8
+          git diff --exit-code "$base" -- \
+            apps/api/src/trial/pre-ticket-trial-owner-flow.ts \
+            apps/api/src/trial/tls-day1-golden-flow.ts \
+            apps/api/src/trial/tls-day2-arc001-flow.ts \
+            deploy/db/seed-tls-day1-golden.sql \
+            deploy/db/seed-tls-day2-arc001.sql \
+            deploy/db/grant-runtime.sh \
+            db/migrations/V001__cf01_core_schema.sql \
+            db/migrations/V002__cf01_runtime_and_exchange_schema.sql \
+            db/migrations/V003__dg04_diagnostic_persistence.sql \
+            db/migrations/V004__d05_pending_capture_v2.sql \
+            package-lock.json
+          test -z "$(git diff --name-only "$base"...HEAD -- db/migrations deploy/db/grant-runtime.sh package-lock.json || true)"
+          npm run verify:boundaries
+          npm run typecheck
+          npm run build
+
+      - name: Disposable PostgreSQL 17 least-privilege setup
+        run: |
+          set -euo pipefail
+          db=appts_dep001_codex058
+          pgcid="$(docker ps --filter ancestor=postgres:17.11-bookworm -q | head -n1)"
+          test -n "$pgcid"
+          PGPASSWORD=codex058-superuser-local-only psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d postgres <<SQL
+          CREATE ROLE appts_migration LOGIN PASSWORD 'codex058-migration-local-only' NOSUPERUSER INHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          CREATE ROLE appts_runtime LOGIN PASSWORD 'codex058-runtime-local-only' NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          CREATE DATABASE ${db} OWNER appts_migration;
+          SQL
+          for f in \
+            db/migrations/V001__cf01_core_schema.sql \
+            db/migrations/V002__cf01_runtime_and_exchange_schema.sql \
+            db/migrations/V003__dg04_diagnostic_persistence.sql \
+            db/migrations/V004__d05_pending_capture_v2.sql; do
+            PGPASSWORD=codex058-migration-local-only psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U appts_migration -d "$db" < "$f"
+          done
+          docker cp deploy/db "$pgcid:/tmp/codex058-db"
+          docker exec "$pgcid" chmod +x /tmp/codex058-db/grant-runtime.sh
+          docker exec \
+            -e PGHOST=127.0.0.1 -e PGPORT=5432 -e PGDATABASE="$db" \
+            -e PGUSER=appts_migration -e PGPASSWORD=codex058-migration-local-only \
+            -e APPTS_DB_NAME="$db" -e APPTS_MIGRATION_ROLE=appts_migration \
+            -e APPTS_RUNTIME_ROLE=appts_runtime \
+            -e 'APPTS_STAGING_LABEL=STAGING SIMULATION / NON-PRODUCTION' \
+            -e APPTS_DISPOSABLE_DATABASE=true -e APPTS_DB_NETWORK_MODE=LOOPBACK \
+            "$pgcid" /tmp/codex058-db/grant-runtime.sh
+          for seed in deploy/db/seed-tls-day1-golden.sql deploy/db/seed-tls-day2-arc001.sql; do
+            set +e
+            PGPASSWORD=codex058-runtime-local-only psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U appts_runtime -d "$db" < "$seed" >/tmp/runtime-seed.out 2>/tmp/runtime-seed.err
+            rc=$?
+            set -e
+            test "$rc" -ne 0
+            grep -qi 'must not run as appts_runtime' /tmp/runtime-seed.err
+            PGPASSWORD=codex058-migration-local-only psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U appts_migration -d "$db" < "$seed"
+          done
+          test "$(PGPASSWORD=codex058-migration-local-only psql -X -At -h 127.0.0.1 -U appts_migration -d "$db" -c 'select count(*) from appts.runtime_ticket')" = 0
+          test "$(PGPASSWORD=codex058-runtime-local-only psql -X -At -h 127.0.0.1 -U appts_runtime -d "$db" -c 'select current_user')" = appts_runtime
+
+      - name: Authenticated Day-3 golden journey, restart, and repeatability
+        env:
+          DATABASE_URL: postgresql://appts_runtime:codex058-runtime-local-only@127.0.0.1:5432/appts_dep001_codex058
+          API_LISTEN_PORT: 8080
+          APPTS_TRIAL_DISCLOSURE_LABEL_REF: 6f79da70-412f-469e-bcf7-f544f81b8aa7
+          APPTS_TLS_SESSION_COOKIE_SECURE: 'false'
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/codex058-evidence
+
+          export CODEX058_OPS_SECRET="$(openssl rand -hex 24)"
+          export CODEX058_VERIFY_SECRET="$(openssl rand -hex 24)"
+          export CODEX058_DISP_SECRET="$(openssl rand -hex 24)"
+          export CODEX058_CLOSE_SECRET="$(openssl rand -hex 24)"
+          export CODEX058_TRAINER_SECRET="$(openssl rand -hex 24)"
+          export APPTS_TLS_TRIAL_CREDENTIAL_HASHES_JSON="$(node --input-type=module <<'NODE'
+          import { hashTlsDay3Credential } from './apps/api/dist/trial/tls-day3-auth.js';
+          const values={
+            'trial.ops.a':process.env.CODEX058_OPS_SECRET,
+            'trial.verify.b':process.env.CODEX058_VERIFY_SECRET,
+            'trial.disp.c':process.env.CODEX058_DISP_SECRET,
+            'trial.close.d':process.env.CODEX058_CLOSE_SECRET,
+            'trial.trainer.1':process.env.CODEX058_TRAINER_SECRET,
+          };
+          process.stdout.write(JSON.stringify(Object.fromEntries(Object.entries(values).map(([alias,secret])=>[alias,hashTlsDay3Credential(secret)]))));
+          NODE
+          )"
+
+          node apps/api/dist/dep-bootstrap.js >/tmp/codex058-api-1.log 2>&1 &
+          pid=$!
+          cleanup(){ kill "$pid" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/readyz >/dev/null && break || sleep 1; done
+          test "$(curl -fsS http://127.0.0.1:8080/healthz)" = '{"status":"ok"}'
+
+          python3 tests/dep001/tls-day3-runtime-proof.py | tee /tmp/codex058-evidence/runtime-main.txt
+
+          closed_ticket="$(cat /tmp/codex058-evidence/closed-ticket-id.txt)"
+          open_ticket="$(cat /tmp/codex058-evidence/open-ticket-id.txt)"
+          test -n "$closed_ticket"; test -n "$open_ticket"; test "$closed_ticket" != "$open_ticket"
+
+          PGPASSWORD=codex058-migration-local-only psql -X -At -h 127.0.0.1 -U appts_migration -d appts_dep001_codex058 <<SQL | tee /tmp/codex058-evidence/durable-before-restart.txt
+          SELECT 'closed_ticket='||count(*) FROM appts.runtime_ticket WHERE ticket_id='${closed_ticket}'::uuid AND current_state_code='CLOSED' AND aggregate_version=3;
+          SELECT 'open_ticket='||count(*) FROM appts.runtime_ticket WHERE ticket_id='${open_ticket}'::uuid AND current_state_code='ACCEPTED' AND aggregate_version=0;
+          SELECT 'closure_readiness_ready='||count(*) FROM appts.closure_readiness_assessment WHERE ticket_id='${closed_ticket}'::uuid AND result_code='READY';
+          SELECT 'closure_claims='||count(*) FROM appts.claim_record WHERE ticket_id='${closed_ticket}'::uuid AND claim_type_ref='CLOSURE_CLAIM';
+          SELECT 'closure_effect_requests='||count(*) FROM appts.lifecycle_effect_request WHERE ticket_id='${closed_ticket}'::uuid AND requested_effect_class='CLOSURE_CLAIM';
+          SELECT 'closed_transitions='||count(*) FROM appts.runtime_state_transition WHERE ticket_id='${closed_ticket}'::uuid AND from_state_code='TERMINAL_PROCESSING' AND to_state_code='CLOSED';
+          SELECT 'reopen_effect_requests='||count(*) FROM appts.lifecycle_effect_request WHERE ticket_id='${closed_ticket}'::uuid AND requested_effect_class ILIKE '%REOPEN%';
+          SELECT 'terminal_transitions='||count(*) FROM appts.runtime_state_transition WHERE ticket_id='${closed_ticket}'::uuid AND to_state_code='TERMINAL_PROCESSING';
+          SELECT 'verified_results='||count(*) FROM appts.verification_result vr JOIN appts.verification_request rq ON rq.verification_request_id=vr.verification_request_id WHERE rq.ticket_id='${closed_ticket}'::uuid AND vr.result_code='VERIFIED';
+          SQL
+          for x in \
+            closed_ticket=1 open_ticket=1 closure_readiness_ready=1 closure_claims=1 \
+            closure_effect_requests=1 closed_transitions=1 reopen_effect_requests=0 \
+            terminal_transitions=1 verified_results=1; do
+            grep -Fxq "$x" /tmp/codex058-evidence/durable-before-restart.txt
+          done
+
+          # Preserve an authenticated cookie across process restart; it must not survive the new server-side session store.
+          python3 - <<'PY'
+          import http.cookiejar,json,os,urllib.request
+          jar=http.cookiejar.MozillaCookieJar('/tmp/codex058-evidence/pre-restart-cookie.txt')
+          op=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+          body=json.dumps({'alias':'trial.ops.a','credential':os.environ['CODEX058_OPS_SECRET']}).encode()
+          req=urllib.request.Request('http://127.0.0.1:8080/api/v1/auth/login',data=body,headers={'content-type':'application/json'},method='POST')
+          with op.open(req,timeout=30) as r: assert r.status==200
+          jar.save(ignore_discard=True,ignore_expires=True)
+          PY
+
+          kill "$pid"; wait "$pid" || true
+          node apps/api/dist/dep-bootstrap.js >/tmp/codex058-api-2.log 2>&1 &
+          pid=$!
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/readyz >/dev/null && break || sleep 1; done
+
+          python3 - <<'PY'
+          import http.cookiejar,urllib.error,urllib.request
+          jar=http.cookiejar.MozillaCookieJar('/tmp/codex058-evidence/pre-restart-cookie.txt'); jar.load(ignore_discard=True,ignore_expires=True)
+          op=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+          try:
+            op.open('http://127.0.0.1:8080/api/v1/auth/session',timeout=30)
+            raise AssertionError('pre-restart session unexpectedly survived process restart')
+          except urllib.error.HTTPError as e:
+            assert e.code==401,e.code
+          PY
+
+          CODEX058_PHASE=restart python3 tests/dep001/tls-day3-runtime-proof.py | tee /tmp/codex058-evidence/runtime-restart.txt
+
+          PGPASSWORD=codex058-migration-local-only psql -X -At -h 127.0.0.1 -U appts_migration -d appts_dep001_codex058 <<SQL | tee /tmp/codex058-evidence/durable-after-restart.txt
+          SELECT 'closed_ticket='||count(*) FROM appts.runtime_ticket WHERE ticket_id='${closed_ticket}'::uuid AND current_state_code='CLOSED' AND aggregate_version=3;
+          SELECT 'open_ticket='||count(*) FROM appts.runtime_ticket WHERE ticket_id='${open_ticket}'::uuid AND current_state_code='ACCEPTED' AND aggregate_version=0;
+          SELECT 'closure_effect_requests='||count(*) FROM appts.lifecycle_effect_request WHERE ticket_id='${closed_ticket}'::uuid AND requested_effect_class='CLOSURE_CLAIM';
+          SELECT 'closed_transitions='||count(*) FROM appts.runtime_state_transition WHERE ticket_id='${closed_ticket}'::uuid AND to_state_code='CLOSED';
+          SQL
+          for x in closed_ticket=1 open_ticket=1 closure_effect_requests=1 closed_transitions=1; do grep -Fxq "$x" /tmp/codex058-evidence/durable-after-restart.txt; done
+
+          # Actual browser bootstrap proof: unauthenticated Product route lands on the real Login surface.
+          CHROME=""; for c in google-chrome google-chrome-stable chromium chromium-browser; do command -v "$c" >/dev/null 2>&1 && CHROME="$(command -v "$c")" && break; done
+          test -n "$CHROME"
+          "$CHROME" --version | tee /tmp/codex058-evidence/browser-version.txt
+          "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=5000 --dump-dom http://127.0.0.1:8080/work > /tmp/codex058-evidence/login-from-work.html
+          grep -Fq 'TLS Training Login' /tmp/codex058-evidence/login-from-work.html
+          grep -Fq 'trial.ops.a' /tmp/codex058-evidence/login-from-work.html
+
+          printf '%s\n' \
+            D3_01_UNAUTH_FAIL_CLOSED=PASS \
+            D3_02_INVALID_VALID_LOGIN=PASS \
+            D3_03_EXACT_ALIAS_BINDING=PASS \
+            D3_04_CLIENT_AUTHORITY_TAMPER=PASS \
+            D3_05_SESSION_ISOLATION_LOGOUT=PASS \
+            D3_06_TRAINER_NO_PRODUCT_AUTHORITY=PASS \
+            D3_07_DAY2_REGRESSION=PASS \
+            D3_08_PREMATURE_WRONG_ROLE_CLOSE=PASS \
+            D3_09_D_CLOSURE_GATE=PASS \
+            D3_10_AGGREGATE_CONTEXT_STALE=PASS \
+            D3_11_SINGLE_TP_TO_CLOSED=PASS \
+            D3_12_REPLAY_NO_DUPLICATE=PASS \
+            D3_13_CLOSED_RESTART_DURABLE=PASS \
+            D3_14_END_SHIFT_READ_ONLY=PASS \
+            D3_15_LOGOUT_LOGIN_CONTINUITY=PASS \
+            D3_16_FRESH_GOVERNED_RERUN=PASS \
+            D3_17_ROLE_SCOPED_SERVER_DERIVED_UX=PASS \
+            D3_18_BOUNDARY_NOT_BROADENED=PASS \
+            PUBLIC_INTERNET_EXPOSURE_CHANGE=NONE \
+            > /tmp/codex058-evidence/SUMMARY.txt
+          cat /tmp/codex058-evidence/SUMMARY.txt
+
+      - name: Upload Day-3 runtime evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: CODEX058_DAY3_RUNTIME_EVIDENCE
+          path: /tmp/codex058-evidence
+          if-no-files-found: error
+          retention-days: 30
