@@ -8,10 +8,13 @@ import { apiConfigFromEnv, type ApiConfig, type Env } from "@appts-restore-servi
 import { createLogger, type Logger } from "@appts-restore-service/observability";
 import { composeApi, type ApiComposition } from "./composition.ts";
 import { createTrialProjectionPort } from "./projections/trial-projection-port.ts";
+import { registerTlsDay3AuthRoutes } from "./routes/trial-auth-http.ts";
 import { registerUiHttpRoutes } from "./routes/ui-http.ts";
 import { createTrialPreTicketIntentDispatcher } from "./trial/pre-ticket-trial-owner-flow.ts";
 import { createTlsDay1GoldenDispatcher } from "./trial/tls-day1-golden-flow.ts";
 import { createTlsDay2Arc001Dispatcher } from "./trial/tls-day2-arc001-flow.ts";
+import { createTlsDay3Arc002Dispatcher, prepareExistingTlsDay3Closures } from "./trial/tls-day3-arc002-flow.ts";
+import { createTlsDay3TrialAuth, type TlsDay3TrialAuth } from "./trial/tls-day3-auth.ts";
 
 const DEP_COMPONENT = "api-dep001";
 const SERVICE_WORKER_PATH = "/service-worker.js";
@@ -25,31 +28,47 @@ function requireStaticBundle(staticRoot: string): void { let rootStats: ReturnTy
 function requestPath(request: FastifyRequest): string { try { return new URL(request.url, "http://dep-bootstrap.invalid").pathname; } catch { return ""; } }
 function acceptsHtml(request: FastifyRequest): boolean { const accept = request.headers.accept?.toLowerCase(); return accept === undefined || accept.includes("text/html"); }
 function sendNotFound(reply: FastifyReply): void { reply.callNotFound(); }
-function registerDeploymentRoutes(app: FastifyInstance): void {
+function registerDeploymentRoutes(app: FastifyInstance, auth:TlsDay3TrialAuth): void {
   app.get("/healthz", async (_request, reply) => reply.header("Cache-Control", "no-store").send({ status: "ok" }));
   app.get("/readyz", async (_request, reply) => reply.header("Cache-Control", "no-store").send({ status: "ready" }));
   app.get(SERVICE_WORKER_PATH, async (_request, reply) => { reply.header("Service-Worker-Allowed", "/"); return reply.sendFile("service-worker.js"); });
-  app.get("/*", async (request, reply) => { const pathname = requestPath(request); if (pathname === "" || pathname === "/api" || pathname.startsWith(API_PATH_PREFIX)) return sendNotFound(reply); if (pathname === "/") return reply.sendFile("index.html"); if (acceptsHtml(request) && !pathname.includes(".")) return reply.sendFile("index.html"); const assetPath = pathname.replace(/^\/+/, ""); if (assetPath === "") { sendNotFound(reply); return; } return reply.sendFile(assetPath); });
+  app.get("/*", async (request, reply) => {
+    const pathname = requestPath(request);
+    if (pathname === "" || pathname === "/api" || pathname.startsWith(API_PATH_PREFIX)) return sendNotFound(reply);
+    const assetPath = pathname.replace(/^\/+/, "");
+    if (pathname.includes(".")) return assetPath === "" ? sendNotFound(reply) : reply.sendFile(assetPath);
+    if (!acceptsHtml(request)) return sendNotFound(reply);
+    if (pathname === "/login") return reply.header("Cache-Control","no-store").sendFile("index.html");
+    const session=auth.current(request);
+    if(!session)return reply.redirect("/login");
+    if(pathname.startsWith("/trainer/")&&!session.trainerOnly)return reply.redirect("/work");
+    if(pathname==="/"&&session.trainerOnly)return reply.redirect("/trainer/tls-day2");
+    if(pathname==="/"&&!session.trainerOnly)return reply.redirect("/work");
+    return reply.header("Cache-Control","no-store").sendFile("index.html");
+  });
 }
 
 export async function createDepBootstrapServer(options: DepBootstrapOptions = {}): Promise<DepBootstrap> {
   const logger: Logger = createLogger({ component: DEP_COMPONENT }); let config: ApiConfig;
   try { config = apiConfigFromEnv(options.env ?? process.env); } catch (error) { const details = error as { readonly code?: unknown; readonly field?: unknown }; logger.error({ code: typeof details.code === "string" ? details.code : "CONFIG_INVALID", field: typeof details.field === "string" ? details.field : "unknown" }, "DEP API configuration rejected"); throw error; }
   const staticRoot = resolve(options.staticRoot ?? defaultStaticRoot); try { requireStaticBundle(staticRoot); } catch (error) { logger.error({ reason: "static bundle unavailable" }, "DEP API static bootstrap rejected"); throw error; }
+  const auth=createTlsDay3TrialAuth((options.env??process.env) as Readonly<Record<string,string|undefined>>);
   const ownedPool = options.composition === undefined && options.pool === undefined ? createPersistencePool({ connectionString: config.databaseUrl }) : undefined;
   const pool = options.pool ?? ownedPool;
   const fallbackIntents = pool === undefined ? undefined : createTrialPreTicketIntentDispatcher(pool);
   const day1Intents = pool === undefined ? undefined : createTlsDay1GoldenDispatcher(pool, fallbackIntents!);
+  const day2Intents = pool === undefined ? undefined : createTlsDay2Arc001Dispatcher(pool, day1Intents!);
   const composition = options.composition ?? composeApi({
     projections: createTrialProjectionPort(pool!),
-    intents: createTlsDay2Arc001Dispatcher(pool!, day1Intents!),
+    intents: createTlsDay3Arc002Dispatcher(pool!, day2Intents!),
     diagnostics: Object.freeze({ async retrieve(): Promise<never> { throw new Error("DIAGNOSTIC_AUTHORITY_BINDING_REQUIRED"); } }),
   });
+  if(pool!==undefined&&options.composition===undefined)await prepareExistingTlsDay3Closures(pool);
   const app = fastify({ logger: false });
   await app.register(fastifyStatic, { root: staticRoot, serve: false, wildcard: false, index: false, redirect: false });
-  registerUiHttpRoutes(app, composition); registerDeploymentRoutes(app);
+  registerTlsDay3AuthRoutes(app,auth);registerUiHttpRoutes(app, composition,auth); registerDeploymentRoutes(app,auth);
   const close = async (): Promise<void> => { await app.close(); if (ownedPool !== undefined) await ownedPool.end(); logger.info("DEP API stopped"); };
-  logger.info({ port: config.apiPort, staticBootstrap: "ready", uiComposition: "registered" }, "DEP API prepared");
+  logger.info({ port: config.apiPort, staticBootstrap: "ready", uiComposition: "registered", trialAuthAliasesConfigured:auth.configuredAliases.length }, "DEP API prepared");
   return Object.freeze({ app, config, staticRoot, composition, close });
 }
 export async function startDepBootstrap(options: DepBootstrapOptions = {}): Promise<DepBootstrap> { const server = await createDepBootstrapServer(options); try { await server.app.listen({ host: "0.0.0.0", port: server.config.apiPort }); } catch (error) { await server.app.close(); throw error; } return server; }
