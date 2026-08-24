@@ -26,7 +26,7 @@ printf '%s\n' \
   printf 'readyz='; curl -fsS http://127.0.0.1:8080/readyz; echo
   printf 'unauth_work_queue_status='; curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/v1/ui/work-queue; echo
   tmp=\$(mktemp); trap 'rm -f \"\$tmp\"' EXIT
-  curl -sS -D \"\$tmp\" -o /dev/null http://127.0.0.1:8080/work
+  curl -sS -H 'Accept: text/html' -D \"\$tmp\" -o /dev/null http://127.0.0.1:8080/work
   printf 'work_redirect_status='; awk 'toupper(\$1) ~ /^HTTP\\// {code=\$2} END{print code}' \"\$tmp\"
   printf 'work_redirect_location='; awk 'BEGIN{IGNORECASE=1} /^Location:/ {gsub(/\\r/,\"\",\$2); print \$2}' \"\$tmp\"
   sudo ss -H -lnt | grep -E '(:22|:80|:443|:8080|:5432)([[:space:]]|$)' || true
