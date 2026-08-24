@@ -1,0 +1,75 @@
+name: DT TLS Day-3 controlled hostname DNS check
+
+on:
+  push:
+    branches:
+      - experiment/independent-restore-deploy
+    paths:
+      - INDEPENDENT_DEPLOYMENT/DAY3_DNS_CHECK_REQUEST
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  dns-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout controlled DT branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate request and target
+        shell: bash
+        env:
+          INDEP_HOST: ${{ secrets.INDEP_HOST }}
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < INDEPENDENT_DEPLOYMENT/DAY3_DNS_CHECK_REQUEST)" = 'MCR_TO_DT_020 DNS_BINDING_CHECK'
+          test -n "$INDEP_HOST"
+          bash -n INDEPENDENT_DEPLOYMENT/scripts/tls-day3-public-dns-check.sh
+          echo 'REQUEST_VALIDATION=PASS' >> "$GITHUB_ENV"
+      - name: Execute read-only DNS and boundary check
+        shell: bash
+        env:
+          INDEP_HOST: ${{ secrets.INDEP_HOST }}
+        run: |
+          set -euo pipefail
+          bash INDEPENDENT_DEPLOYMENT/scripts/tls-day3-public-dns-check.sh 2>&1 | tee INDEPENDENT_DEPLOYMENT/evidence/day3-dns-${GITHUB_RUN_ID}.txt
+          summary="INDEPENDENT_DEPLOYMENT/evidence/day3-dns-${GITHUB_RUN_ID}/SUMMARY.txt"
+          echo "DNS_DISPOSITION=$(awk -F= '/^dns_check_disposition=/{print $2}' "$summary")" >> "$GITHUB_ENV"
+          echo "FIRST_BLOCKER=$(awk -F= '/^first_blocker=/{print $2}' "$summary")" >> "$GITHUB_ENV"
+          echo 'ACTION_EXECUTION=PASS' >> "$GITHUB_ENV"
+      - name: Upload DNS evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-restore-day3-dns-${{ github.run_id }}
+          path: INDEPENDENT_DEPLOYMENT/evidence/
+          retention-days: 30
+      - name: Publish safe DNS pointer
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p INDEPENDENT_DEPLOYMENT/evidence
+          cat > INDEPENDENT_DEPLOYMENT/evidence/LAST_DAY3_DNS_RUN.md <<EOF
+          # Independent Deployment Day-3 DNS Last Run
+
+          run_id: ${GITHUB_RUN_ID}
+          trigger_commit: ${GITHUB_SHA}
+          job_status: ${{ job.status }}
+          request_validation: ${REQUEST_VALIDATION:-NOT_REACHED}
+          action_execution: ${ACTION_EXECUTION:-NOT_REACHED}
+          dns_disposition: ${DNS_DISPOSITION:-NOT_REACHED}
+          first_blocker: ${FIRST_BLOCKER:-NOT_REACHED}
+          public_activation: NOT_PERFORMED
+          recorded_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- INDEPENDENT_DEPLOYMENT/evidence/LAST_DAY3_DNS_RUN.md
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'chore(experiment): record Day-3 DNS evidence'
+          git push origin HEAD:refs/heads/experiment/independent-restore-deploy
