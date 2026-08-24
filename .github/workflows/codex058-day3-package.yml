@@ -1,0 +1,202 @@
+name: CODEX058 Day-3 deterministic transfer producer
+on:
+  pull_request:
+    branches:
+      - verification/codex058-package-anchor
+    paths:
+      - '.github/CODEX058_PACKAGE_TRIGGER'
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact frozen candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 1887f8bd8ff0d433f8c6e3cc882245cf2d819a30
+          fetch-depth: 0
+
+      - name: Produce deterministic DT transfer
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=741af578f1cab210d37dbb5f96877c6a09f62dd8
+          SOURCE=1887f8bd8ff0d433f8c6e3cc882245cf2d819a30
+          ROOT=/tmp/CODEX058_DT_TRANSFER_v1.0_CONTROLLED
+          OUT=/tmp/CODEX058_DT_TRANSFER_v1.0_CONTROLLED.zip
+          rm -rf "$ROOT" "$OUT"
+          mkdir -p "$ROOT/OVERLAY"
+
+          cat > /tmp/codex058-admitted.txt <<'EOF'
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/src/dep-bootstrap.ts
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/src/projections/trial-projection-port.ts
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/src/routes/trial-auth-http.ts
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/src/routes/trial-end-shift-http.ts
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/src/routes/trial-trainer-http.ts
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/src/routes/ui-http.ts
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/src/routes/ui-read.ts
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/src/trial/tls-day3-arc002-flow.ts
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/src/trial/tls-day3-auth.ts
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/src/trial/tls-day3-trainer-reseed.ts
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/web/src/app.tsx
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/web/src/auth.ts
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/web/src/router.ts
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/web/src/views/ClosureReadinessView.tsx
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/web/src/views/EndShiftView.tsx
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/web/src/views/LoginView.tsx
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/web/src/views/TicketConsoleView.tsx
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/web/src/views/TrainerConsoleView.tsx
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/web/src/views/WorkQueueView.tsx
+          DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/tests/dep001/tls-day3-runtime-proof.py
+          EOF
+          sed -i 's/^          //' /tmp/codex058-admitted.txt
+          test "$(wc -l < /tmp/codex058-admitted.txt)" -eq 20
+
+          git diff --name-only "$BASE" "$SOURCE" -- DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001 | sort > /tmp/codex058-actual.txt
+          sort /tmp/codex058-admitted.txt > /tmp/codex058-expected.txt
+          diff -u /tmp/codex058-expected.txt /tmp/codex058-actual.txt
+
+          # Hard-protected baseline must remain byte-identical.
+          git diff --exit-code "$BASE" "$SOURCE" -- \
+            DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/src/trial/pre-ticket-trial-owner-flow.ts \
+            DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/src/trial/tls-day1-golden-flow.ts \
+            DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/src/trial/tls-day2-arc001-flow.ts \
+            DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/deploy/db/seed-tls-day1-golden.sql \
+            DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/deploy/db/seed-tls-day2-arc001.sql \
+            DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/deploy/db/grant-runtime.sh \
+            DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/db/migrations/V001__cf01_core_schema.sql \
+            DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/db/migrations/V002__cf01_runtime_and_exchange_schema.sql \
+            DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/db/migrations/V003__dg04_diagnostic_persistence.sql \
+            DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/db/migrations/V004__d05_pending_capture_v2.sql \
+            DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/package-lock.json
+
+          mapfile -t FILES < /tmp/codex058-admitted.txt
+          for f in "${FILES[@]}"; do
+            test -f "$f"
+            mkdir -p "$ROOT/OVERLAY/$(dirname "$f")"
+            cp "$f" "$ROOT/OVERLAY/$f"
+          done
+
+          git diff --binary "$BASE" "$SOURCE" -- "${FILES[@]}" > "$ROOT/CODEX058_DAY3_ADMITTED.patch"
+
+          cat > "$ROOT/SOURCE_IDENTITY.txt" <<EOF
+          CONTROLLED_TRANSFER=CODEX058_DT_TRANSFER_v1.0_CONTROLLED
+          AUTHORITY=MCR-to-CODEX-058 / ARC-to-MCR-002
+          ACCEPTED_BASE=$BASE
+          FROZEN_SOURCE=$SOURCE
+          ADMITTED_OVERLAY_FILES=20
+          VERIFICATION_WORKFLOWS_EXCLUDED=true
+          BUILD_PACK_MUTATED=false
+          PUBLIC_INTERNET_EXPOSURE_CHANGE=NONE
+          EOF
+          sed -i 's/^          //' "$ROOT/SOURCE_IDENTITY.txt"
+
+          cat > "$ROOT/VERIFICATION_EVIDENCE_REFERENCE.txt" <<'EOF'
+          PRODUCER_RUNTIME_RUN=32686928839
+          PRODUCER_RUNTIME_JOB=97313627449
+          PRODUCER_RUNTIME_RESULT=SUCCESS
+          PRODUCER_RUNTIME_ARTIFACT_ID=9505994317
+          PRODUCER_RUNTIME_ARTIFACT_NAME=CODEX058_DAY3_RUNTIME_EVIDENCE
+          PRODUCER_RUNTIME_ARTIFACT_SHA256=394ac8a045558c2b2ac80d29951e482fd9d6f6b8110258726bf87d27620aab35
+          D3_01_TO_D3_18=PASS
+          CONTRACT_TESTS=47/47_PASS
+          ADVERSE_TESTS=29/29_PASS
+          POSTGRESQL=17.11
+          NODE=24.19.0
+          NPM=11.17.0
+          BROWSER=Google_Chrome_151.0.7922.137
+          PUBLIC_INTERNET_EXPOSURE_CHANGE=NONE
+          EOF
+          sed -i 's/^          //' "$ROOT/VERIFICATION_EVIDENCE_REFERENCE.txt"
+
+          cat > "$ROOT/APPLY_AND_VERIFY.md" <<'EOF'
+          # CODEX058 Day-3 DT Transfer — Apply and Verify
+
+          This package is a bounded overlay for `MCR-to-CODEX-058` / `ARC-to-MCR-002`.
+
+          ## Required starting point
+          - Repository must be at exact accepted Day-2 base `741af578f1cab210d37dbb5f96877c6a09f62dd8`.
+          - Non-production Trial only. Do not expose publicly and do not use Production/UAT/real customer data.
+
+          ## Apply
+          Copy the complete contents of `OVERLAY/` to the repository root, preserving paths. No file deletion is authorized by this transfer.
+
+          The included `CODEX058_DAY3_ADMITTED.patch` is equivalent review evidence for the same 20 admitted files.
+
+          ## Security and identity boundary
+          - Credential values are NOT included in this package.
+          - Configure only credential hashes through `APPTS_TLS_TRIAL_CREDENTIAL_HASHES_JSON` at deployment/runtime configuration boundary.
+          - The browser does not select Product actor/Role/Assignment authority.
+          - Trainer remains a simulation control plane and has no Product action authority.
+          - Existing V001–V004 migrations, runtime grants, Day-1/Day-2 seeds and package-lock are unchanged.
+
+          ## Verify
+          From `DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001` run the accepted exact dependency/toolchain process, then at minimum:
+          1. `npm ci`
+          2. `npm run verify:boundaries`
+          3. `npm run typecheck`
+          4. `npm run build`
+          5. `npm run test:contracts`
+          6. `npm run test:adverse`
+          7. Apply V001–V004 and existing runtime grants to a disposable PostgreSQL 17 Trial DB.
+          8. Prove Day-1 and Day-2 static seeds are rejected under `appts_runtime`, then apply them only under deployment/migration identity.
+          9. Execute `tests/dep001/tls-day3-runtime-proof.py` with five controlled Trial credential secrets supplied only through runtime environment.
+          10. Verify unauthenticated fail-closed login, exact five alias/session bindings, client-authority tamper rejection, Trainer non-authority, Day-2 regression, independent verifier B, terminal authority C, Closure Authority D, aggregate+context stale rejection, exactly one `TERMINAL_PROCESSING -> CLOSED`, replay no duplicate effect, no REOPEN, End Shift read-only, logout/login continuity, fresh governed rerun, process restart durability, and browser Login bootstrap.
+
+          Expected producer evidence is identified in `VERIFICATION_EVIDENCE_REFERENCE.txt`.
+          EOF
+          sed -i 's/^          //' "$ROOT/APPLY_AND_VERIFY.md"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os, zipfile
+          root=Path('/tmp/CODEX058_DT_TRANSFER_v1.0_CONTROLLED')
+          overlay=root/'OVERLAY'
+          records=[]
+          for p in sorted(x for x in overlay.rglob('*') if x.is_file()):
+              rel=p.relative_to(overlay).as_posix()
+              data=p.read_bytes()
+              records.append({'path':rel,'size':len(data),'sha256':hashlib.sha256(data).hexdigest()})
+          manifest={
+              'transfer_identity':'CODEX058_DT_TRANSFER_v1.0_CONTROLLED',
+              'authority':'MCR-to-CODEX-058 / ARC-to-MCR-002',
+              'accepted_base':'741af578f1cab210d37dbb5f96877c6a09f62dd8',
+              'frozen_source':'1887f8bd8ff0d433f8c6e3cc882245cf2d819a30',
+              'admitted_overlay_file_count':len(records),
+              'files':records,
+              'protected_baseline_unchanged':True,
+              'build_pack_mutated':False,
+              'public_internet_exposure_change':'NONE',
+          }
+          (root/'MANIFEST.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n',encoding='utf-8')
+          (root/'CHECKSUMS.sha256').write_text(''.join(f"{r['sha256']}  OVERLAY/{r['path']}\n" for r in records),encoding='utf-8')
+          assert len(records)==20
+          out=Path('/tmp/CODEX058_DT_TRANSFER_v1.0_CONTROLLED.zip')
+          with zipfile.ZipFile(out,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=9) as z:
+              for p in sorted(x for x in root.rglob('*') if x.is_file()):
+                  arc=p.relative_to(root).as_posix()
+                  info=zipfile.ZipInfo(arc,date_time=(1980,1,1,0,0,0))
+                  info.create_system=3
+                  info.external_attr=(0o100644 << 16)
+                  info.compress_type=zipfile.ZIP_DEFLATED
+                  z.writestr(info,p.read_bytes(),compress_type=zipfile.ZIP_DEFLATED,compresslevel=9)
+          digest=hashlib.sha256(out.read_bytes()).hexdigest()
+          meta=f"FILE={out.name}\nSIZE={out.stat().st_size}\nSHA256={digest}\n"
+          Path('/tmp/CODEX058_PACKAGE_METADATA.txt').write_text(meta,encoding='utf-8')
+          print(meta,end='')
+          PY
+
+          cat /tmp/CODEX058_PACKAGE_METADATA.txt
+          unzip -t /tmp/CODEX058_DT_TRANSFER_v1.0_CONTROLLED.zip
+
+      - name: Upload deterministic transfer
+        uses: actions/upload-artifact@v4
+        with:
+          name: CODEX058_DT_TRANSFER_PRODUCER
+          path: |
+            /tmp/CODEX058_DT_TRANSFER_v1.0_CONTROLLED.zip
+            /tmp/CODEX058_PACKAGE_METADATA.txt
+          if-no-files-found: error
+          retention-days: 30
