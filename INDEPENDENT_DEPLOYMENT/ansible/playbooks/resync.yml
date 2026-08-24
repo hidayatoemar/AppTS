@@ -10,6 +10,8 @@
     appts_transfer_archive: /tmp/appts-independent-dep001-resync.tar.gz
     appts_db_secret_file: /etc/appts-independent/db-secrets.json
     appts_runtime_password: "{{ lookup('ansible.builtin.env', 'INDEP_POSTGRES_PASSWORD') }}"
+    appts_trial_credential_hashes_json: "{{ lookup('ansible.builtin.env', 'APPTS_TLS_TRIAL_CREDENTIAL_HASHES_JSON') }}"
+    appts_tls_session_cookie_secure: "{{ lookup('ansible.builtin.env', 'APPTS_TLS_SESSION_COOKIE_SECURE') | default('true', true) }}"
   tasks:
     - name: Require existing isolated DT install directory
       ansible.builtin.stat:
@@ -27,6 +29,7 @@
           - install_dir.stat.exists
           - db_secret_file_state.stat.exists
           - appts_runtime_password | length > 0
+          - appts_trial_credential_hashes_json | length > 0
         fail_msg: "BLOCKED: preserved DT deployment/credential binding is absent"
       no_log: true
 
@@ -114,6 +117,7 @@
       args:
         chdir: "{{ appts_compose_dir }}"
       changed_when: false
+      no_log: true
 
     - name: Confirm preserved PostgreSQL container identity is unchanged
       ansible.builtin.command:
@@ -146,3 +150,4 @@
           - "database_reset=false"
           - "migration_execution=false"
           - "accepted_trial_disclosure_binding=rendered"
+          - "accepted_day3_auth_hash_registry=rendered_without_secret_output"
