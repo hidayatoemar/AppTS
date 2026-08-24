@@ -1,0 +1,82 @@
+name: DT Day-3 secret-safe API diagnostic
+
+on:
+  push:
+    branches:
+      - experiment/independent-restore-deploy
+    paths:
+      - INDEPENDENT_DEPLOYMENT/DAY3_API_DIAG_REQUEST
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      INDEP_HOST: ${{ secrets.INDEP_HOST }}
+      INDEP_USER: ${{ secrets.INDEP_USER }}
+      INDEP_SSH_PRIVATE_KEY: ${{ secrets.INDEP_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate request and target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < INDEPENDENT_DEPLOYMENT/DAY3_API_DIAG_REQUEST)" = 'MCR_TO_DT_020 SECRET_SAFE_API_DIAGNOSTIC'
+          test -n "$INDEP_HOST"; test -n "$INDEP_USER"; test -n "$INDEP_SSH_PRIVATE_KEY"
+          mkdir -p ~/.ssh; chmod 700 ~/.ssh
+          printf '%s\n' "$INDEP_SSH_PRIVATE_KEY" > ~/.ssh/independent_deploy_key; chmod 600 ~/.ssh/independent_deploy_key
+          ssh-keyscan -H "$INDEP_HOST" >> ~/.ssh/known_hosts; chmod 600 ~/.ssh/known_hosts
+      - name: Read secret-safe current API failure evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          E=INDEPENDENT_DEPLOYMENT/evidence/day3-api-diag-${GITHUB_RUN_ID}; mkdir -p "$E"
+          ssh -i ~/.ssh/independent_deploy_key -o BatchMode=yes "${INDEP_USER}@${INDEP_HOST}" 'bash -s' <<'REMOTE' | tee "$E/diagnostic.txt"
+          set -euo pipefail
+          cd /opt/appts-independent-restore-service/deploy/compose
+          cid=$(sudo docker compose -f compose.yaml --env-file .env ps -q api || true)
+          echo "api_container_present=$([ -n "$cid" ] && echo yes || echo no)"
+          if [ -n "$cid" ]; then
+            sudo docker inspect "$cid" --format 'api_state={{.State.Status}}'
+            sudo docker inspect "$cid" --format 'api_running={{.State.Running}}'
+            sudo docker inspect "$cid" --format 'api_restarting={{.State.Restarting}}'
+            sudo docker inspect "$cid" --format 'api_exit_code={{.State.ExitCode}}'
+            sudo docker inspect "$cid" --format 'api_oom_killed={{.State.OOMKilled}}'
+            sudo docker inspect "$cid" --format 'api_restart_count={{.RestartCount}}'
+            echo '== sanitized application log tail =='
+            sudo docker logs --tail 80 "$cid" 2>&1 | sed -E 's/(postgres(ql)?:\/\/)[^@[:space:]]+@/\1REDACTED@/g; s/(scrypt\$)[A-Za-z0-9_-]+\$[A-Za-z0-9_-]+/\1REDACTED\$REDACTED/g'
+          fi
+          sudo python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/opt/appts-independent-restore-service/deploy/compose/.env')
+          vals={}
+          for line in p.read_text().splitlines():
+              if '=' in line:
+                  k,v=line.split('=',1); vals[k]=v
+          raw=vals.get('APPTS_TLS_TRIAL_CREDENTIAL_HASHES_JSON','')
+          if raw.startswith("'") and raw.endswith("'"): raw=raw[1:-1]
+          ok=False; count=0; formats=False
+          try:
+              obj=json.loads(raw); count=len(obj); formats=(set(obj)=={'trial.ops.a','trial.verify.b','trial.disp.c','trial.close.d','trial.trainer.1'} and all(isinstance(v,str) and v.startswith('scrypt$') and v.count('$')==2 for v in obj.values())); ok=True
+          except Exception: pass
+          print('credential_registry_json_parse='+('PASS' if ok else 'FAIL'))
+          print('credential_registry_alias_count='+str(count))
+          print('credential_registry_hash_format='+('PASS' if formats else 'FAIL'))
+          print('secure_cookie_setting='+('true' if vals.get('APPTS_TLS_SESSION_COOKIE_SECURE')=='true' else 'NOT_TRUE'))
+          PY
+          echo "loopback_8080=$((timeout 2 bash -c '</dev/tcp/127.0.0.1/8080' >/dev/null 2>&1 && echo OPEN) || echo CLOSED)"
+          REMOTE
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-restore-day3-api-diagnostic-${{ github.run_id }}
+          path: INDEPENDENT_DEPLOYMENT/evidence/day3-api-diag-${{ github.run_id }}/
+          retention-days: 30
