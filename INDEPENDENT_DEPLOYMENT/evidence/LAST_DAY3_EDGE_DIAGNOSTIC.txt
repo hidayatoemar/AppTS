@@ -1,0 +1,27 @@
+phase=host_precheck
+api_health={"status":"ok"}
+firewalld_active=no
+firewalld_http_https=NOT_APPLICABLE
+phase=host_edge_started
+caddy_state=exited
+local_http_status=000
+== caddy_log_sanitized ==
+{"level":"info","ts":1787553354.8868232,"msg":"maxprocs: Leaving GOMAXPROCS=2: CPU quota undefined"}
+{"level":"info","ts":1787553354.8869894,"msg":"GOMEMLIMIT is updated","GOMEMLIMIT":3700953907,"previous":9223372036854775807}
+{"level":"info","ts":1787553354.8870137,"msg":"using config from file","file":"/etc/caddy/Caddyfile"}
+Error: adapting config using caddyfile: Unexpected next token after '{' on same line, at /etc/caddy/Caddyfile:2
+phase=external_probe
+external_tcp_80=CLOSED_OR_FILTERED
+external_tcp_443=CLOSED_OR_FILTERED
+external_tcp_8080=CLOSED_OR_FILTERED
+external_tcp_5432=CLOSED_OR_FILTERED
+external_http_status=000
+external_https_status=000
+phase=caddy_post_external_probe
+{"level":"info","ts":1787553354.8868232,"msg":"maxprocs: Leaving GOMAXPROCS=2: CPU quota undefined"}
+{"level":"info","ts":1787553354.8869894,"msg":"GOMEMLIMIT is updated","GOMEMLIMIT":3700953907,"previous":9223372036854775807}
+{"level":"info","ts":1787553354.8870137,"msg":"using config from file","file":"/etc/caddy/Caddyfile"}
+Error: adapting config using caddyfile: Unexpected next token after '{' on same line, at /etc/caddy/Caddyfile:2
+diagnostic_run_id=32697966529
+edge_left_running=NO
+secrets_disclosed=NO
