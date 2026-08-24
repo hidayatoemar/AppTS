@@ -1,0 +1,72 @@
+name: DT Day-3 registry serialization diagnostic
+
+on:
+  push:
+    branches:
+      - experiment/independent-restore-deploy
+    paths:
+      - INDEPENDENT_DEPLOYMENT/DAY3_REGISTRY_DIAG_REQUEST
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      INDEP_HOST: ${{ secrets.INDEP_HOST }}
+      INDEP_USER: ${{ secrets.INDEP_USER }}
+      INDEP_SSH_PRIVATE_KEY: ${{ secrets.INDEP_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Capture secret-safe structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < INDEPENDENT_DEPLOYMENT/DAY3_REGISTRY_DIAG_REQUEST)" = 'MCR_TO_DT_020 REGISTRY_SERIALIZATION_DIAGNOSTIC'
+          mkdir -p ~/.ssh; chmod 700 ~/.ssh
+          printf '%s\n' "$INDEP_SSH_PRIVATE_KEY" > ~/.ssh/k; chmod 600 ~/.ssh/k
+          ssh-keyscan -H "$INDEP_HOST" >> ~/.ssh/known_hosts
+          OUT=INDEPENDENT_DEPLOYMENT/evidence/LAST_DAY3_REGISTRY_DIAGNOSTIC.txt
+          ssh -i ~/.ssh/k -o BatchMode=yes "${INDEP_USER}@${INDEP_HOST}" 'sudo python3 -' <<'PY' | tee "$OUT"
+          import json
+          from pathlib import Path
+          aliases={'trial.ops.a','trial.verify.b','trial.disp.c','trial.close.d','trial.trainer.1'}
+          src=Path('/etc/appts-independent/trial-credential-hashes.json').read_text().strip()
+          try:
+              obj=json.loads(src); src_ok=(set(obj)==aliases and all(isinstance(v,str) and v.startswith('scrypt$') and v.count('$')==2 for v in obj.values()))
+              print('root_hash_registry_json=' + ('PASS' if src_ok else 'FAIL'))
+              print('root_hash_registry_alias_count='+str(len(obj)))
+          except Exception as e:
+              print('root_hash_registry_json=FAIL')
+              print('root_hash_registry_error_type='+type(e).__name__)
+          env=Path('/opt/appts-independent-restore-service/deploy/compose/.env').read_text().splitlines()
+          matches=[x for x in env if x.startswith('APPTS_TLS_TRIAL_CREDENTIAL_HASHES_JSON=')]
+          print('compose_registry_line_count='+str(len(matches)))
+          if matches:
+              raw=matches[-1].split('=',1)[1]
+              print('compose_value_length='+str(len(raw)))
+              print('compose_outer_single_quotes='+('YES' if raw.startswith("'") and raw.endswith("'") else 'NO'))
+              value=raw[1:-1] if raw.startswith("'") and raw.endswith("'") else raw
+              try:
+                  obj2=json.loads(value); print('compose_registry_json=PASS'); print('compose_registry_alias_count='+str(len(obj2)))
+              except json.JSONDecodeError as e:
+                  print('compose_registry_json=FAIL')
+                  print('compose_json_error='+e.msg.replace(' ','_'))
+                  print('compose_json_error_pos='+str(e.pos))
+                  around=value[max(0,e.pos-10):e.pos+11]
+                  structural=''.join(ch if ch in '{}[],:$\\"\'' else 'X' for ch in around)
+                  print('compose_error_structure='+structural)
+          print('secrets_disclosed=NO')
+          PY
+          echo "diagnostic_run_id=${GITHUB_RUN_ID}" >> "$OUT"
+      - name: Publish pointer
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'; git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add INDEPENDENT_DEPLOYMENT/evidence/LAST_DAY3_REGISTRY_DIAGNOSTIC.txt
+          git commit -m 'chore(experiment): record registry serialization diagnostic'
+          git push origin HEAD:refs/heads/experiment/independent-restore-deploy
