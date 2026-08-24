@@ -1,0 +1,11 @@
+root_hash_registry_json=PASS
+root_hash_registry_alias_count=5
+compose_registry_line_count=1
+compose_value_length=3
+compose_outer_single_quotes=NO
+compose_registry_json=FAIL
+compose_json_error=Expecting_value
+compose_json_error_pos=0
+compose_error_structure=XXX
+secrets_disclosed=NO
+diagnostic_run_id=32697448973
