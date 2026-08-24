@@ -1,4 +1,5 @@
 export const ROUTES = [
+  ["/login", "TLS-D3-LOGIN"], ["/end-shift", "TLS-D3-END-SHIFT"],
   ["/work", "UX-RS-01"], ["/intake", "UX-RS-02"], ["/intake/:caseId", "UX-RS-02"],
   ["/tickets/:ticketId", "UX-RS-03"], ["/tickets/:ticketId/action/:actionClass", "UX-RS-04"],
   ["/tickets/:ticketId/evidence", "UX-RS-05"], ["/tickets/:ticketId/responsibility", "UX-RS-06"],
