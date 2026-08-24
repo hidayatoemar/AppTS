@@ -1,0 +1,75 @@
+api_container_present=yes
+api_state=restarting
+api_running=true
+api_restarting=true
+api_exit_code=1
+api_oom_killed=false
+api_restart_count=12
+== sanitized_application_log_tail ==
+file:///app/apps/api/dist/trial/tls-day3-auth.js:31
+    throw new Error("TLS_DAY3_CREDENTIAL_REGISTRY_INVALID_JSON");
+          ^
+
+Error: TLS_DAY3_CREDENTIAL_REGISTRY_INVALID_JSON
+    at parseCredentialRegistry (file:///app/apps/api/dist/trial/tls-day3-auth.js:31:11)
+    at createTlsDay3TrialAuth (file:///app/apps/api/dist/trial/tls-day3-auth.js:78:22)
+    at createDepBootstrapServer (file:///app/apps/api/dist/dep-bootstrap.js:89:18)
+    at startDepBootstrap (file:///app/apps/api/dist/dep-bootstrap.js:114:78)
+    at file:///app/apps/api/dist/dep-bootstrap.js:122:26
+    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)
+    at async node:internal/modules/esm/loader:643:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.19.0
+file:///app/apps/api/dist/trial/tls-day3-auth.js:31
+    throw new Error("TLS_DAY3_CREDENTIAL_REGISTRY_INVALID_JSON");
+          ^
+
+Error: TLS_DAY3_CREDENTIAL_REGISTRY_INVALID_JSON
+    at parseCredentialRegistry (file:///app/apps/api/dist/trial/tls-day3-auth.js:31:11)
+    at createTlsDay3TrialAuth (file:///app/apps/api/dist/trial/tls-day3-auth.js:78:22)
+    at createDepBootstrapServer (file:///app/apps/api/dist/dep-bootstrap.js:89:18)
+    at startDepBootstrap (file:///app/apps/api/dist/dep-bootstrap.js:114:78)
+    at file:///app/apps/api/dist/dep-bootstrap.js:122:26
+    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)
+    at async node:internal/modules/esm/loader:643:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.19.0
+file:///app/apps/api/dist/trial/tls-day3-auth.js:31
+    throw new Error("TLS_DAY3_CREDENTIAL_REGISTRY_INVALID_JSON");
+          ^
+
+Error: TLS_DAY3_CREDENTIAL_REGISTRY_INVALID_JSON
+    at parseCredentialRegistry (file:///app/apps/api/dist/trial/tls-day3-auth.js:31:11)
+    at createTlsDay3TrialAuth (file:///app/apps/api/dist/trial/tls-day3-auth.js:78:22)
+    at createDepBootstrapServer (file:///app/apps/api/dist/dep-bootstrap.js:89:18)
+    at startDepBootstrap (file:///app/apps/api/dist/dep-bootstrap.js:114:78)
+    at file:///app/apps/api/dist/dep-bootstrap.js:122:26
+    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)
+    at async node:internal/modules/esm/loader:643:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.19.0
+file:///app/apps/api/dist/trial/tls-day3-auth.js:31
+    throw new Error("TLS_DAY3_CREDENTIAL_REGISTRY_INVALID_JSON");
+          ^
+
+Error: TLS_DAY3_CREDENTIAL_REGISTRY_INVALID_JSON
+    at parseCredentialRegistry (file:///app/apps/api/dist/trial/tls-day3-auth.js:31:11)
+    at createTlsDay3TrialAuth (file:///app/apps/api/dist/trial/tls-day3-auth.js:78:22)
+    at createDepBootstrapServer (file:///app/apps/api/dist/dep-bootstrap.js:89:18)
+    at startDepBootstrap (file:///app/apps/api/dist/dep-bootstrap.js:114:78)
+    at file:///app/apps/api/dist/dep-bootstrap.js:122:26
+    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)
+    at async node:internal/modules/esm/loader:643:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.19.0
+credential_registry_json_parse=FAIL
+credential_registry_alias_count=0
+credential_registry_hash_format=FAIL
+secure_cookie_setting=true
+loopback_8080=CLOSED
+diagnostic_run_id=32697360414
+secrets_disclosed=NO
