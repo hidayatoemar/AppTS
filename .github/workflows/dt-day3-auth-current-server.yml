@@ -1,0 +1,133 @@
+name: DT TLS Day-3 non-public auth/session gate
+
+on:
+  push:
+    branches:
+      - experiment/independent-restore-deploy
+    paths:
+      - INDEPENDENT_DEPLOYMENT/DAY3_AUTH_REQUEST
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: dt-tls-day3-auth-current-server
+  cancel-in-progress: false
+
+jobs:
+  day3-auth-current-server:
+    if: github.ref == 'refs/heads/experiment/independent-restore-deploy'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      INDEP_POSTGRES_PASSWORD: ${{ secrets.INDEP_POSTGRES_PASSWORD }}
+    steps:
+      - name: Checkout controlled DT branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bind exact Node 24.19.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.19.0'
+
+      - name: Bind exact npm and validate request/harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.17.0
+          test "$(node --version)" = 'v24.19.0'
+          test "$(npm --version)" = '11.17.0'
+          test "$(tr -d '\r\n' < INDEPENDENT_DEPLOYMENT/DAY3_AUTH_REQUEST)" = 'MCR_TO_DT_020 DAY3_AUTH_SESSION_GATE'
+          bash -n INDEPENDENT_DEPLOYMENT/scripts/tls-day3-auth-current-server.sh
+          echo 'REQUEST_VALIDATION=PASS' >> "$GITHUB_ENV"
+          echo 'TOOLCHAIN_BINDING=PASS' >> "$GITHUB_ENV"
+
+      - name: Install Ansible
+        run: python3 -m pip install --disable-pip-version-check ansible-core
+
+      - name: Validate target bindings
+        shell: bash
+        env:
+          INDEP_HOST: ${{ secrets.INDEP_HOST }}
+          INDEP_USER: ${{ secrets.INDEP_USER }}
+          INDEP_SSH_PRIVATE_KEY: ${{ secrets.INDEP_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$INDEP_HOST"
+          test -n "$INDEP_USER"
+          test -n "$INDEP_SSH_PRIVATE_KEY"
+          test -n "$INDEP_POSTGRES_PASSWORD"
+          echo 'SECRET_BINDINGS=PASS' >> "$GITHUB_ENV"
+
+      - name: Prepare ephemeral SSH and Ansible inventory
+        shell: bash
+        env:
+          INDEP_HOST: ${{ secrets.INDEP_HOST }}
+          INDEP_USER: ${{ secrets.INDEP_USER }}
+          INDEP_SSH_PRIVATE_KEY: ${{ secrets.INDEP_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$INDEP_SSH_PRIVATE_KEY" > ~/.ssh/independent_deploy_key
+          chmod 600 ~/.ssh/independent_deploy_key
+          ssh-keyscan -H "$INDEP_HOST" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          cat > INDEPENDENT_DEPLOYMENT/ansible/inventory.ini <<EOF
+          [independent]
+          restore-independent ansible_host=$INDEP_HOST ansible_user=$INDEP_USER ansible_ssh_private_key_file=$HOME/.ssh/independent_deploy_key ansible_become=true ansible_python_interpreter=/usr/bin/python3.9
+          EOF
+          echo 'TARGET_BINDING_PREPARED=PASS' >> "$GITHUB_ENV"
+
+      - name: Execute non-public Day-3 authentication/session gate
+        shell: bash
+        env:
+          INDEP_HOST: ${{ secrets.INDEP_HOST }}
+          INDEP_USER: ${{ secrets.INDEP_USER }}
+        run: |
+          set -euo pipefail
+          bash INDEPENDENT_DEPLOYMENT/scripts/tls-day3-auth-current-server.sh 2>&1 | tee INDEPENDENT_DEPLOYMENT/evidence/day3-auth-run-${GITHUB_RUN_ID}.txt
+          echo 'ACTION_EXECUTION=PASS' >> "$GITHUB_ENV"
+          echo 'AUTH_GATE=PASS' >> "$GITHUB_ENV"
+
+      - name: Upload Day-3 auth evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-restore-day3-auth-evidence-${{ github.run_id }}
+          path: INDEPENDENT_DEPLOYMENT/evidence/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish safe Day-3 auth pointer
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p INDEPENDENT_DEPLOYMENT/evidence
+          cat > INDEPENDENT_DEPLOYMENT/evidence/LAST_DAY3_AUTH_RUN.md <<EOF
+          # Independent Deployment Day-3 Auth Gate Last Run
+
+          run_id: ${GITHUB_RUN_ID}
+          trigger_commit: ${GITHUB_SHA}
+          job_status: ${{ job.status }}
+          request_validation: ${REQUEST_VALIDATION:-NOT_REACHED}
+          toolchain_binding: ${TOOLCHAIN_BINDING:-NOT_REACHED}
+          secret_bindings: ${SECRET_BINDINGS:-NOT_REACHED}
+          target_binding_prepared: ${TARGET_BINDING_PREPARED:-NOT_REACHED}
+          action_execution: ${ACTION_EXECUTION:-NOT_REACHED}
+          authentication_gate: ${AUTH_GATE:-NOT_REACHED}
+          public_activation: NOT_PERFORMED
+          recorded_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          No credential or secret values are written to this pointer.
+          EOF
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- INDEPENDENT_DEPLOYMENT/evidence/LAST_DAY3_AUTH_RUN.md
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'chore(experiment): record Day-3 auth gate evidence'
+          git push origin HEAD:refs/heads/experiment/independent-restore-deploy
