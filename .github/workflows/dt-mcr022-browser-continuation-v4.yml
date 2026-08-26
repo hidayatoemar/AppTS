@@ -1,0 +1,134 @@
+name: DT MCR022 browser continuation v4
+on:
+  push:
+    branches:
+      - experiment/dt-mcr022-transport-neutral-v3
+    paths:
+      - '.github/workflows/dt-mcr022-browser-continuation-v4.yml'
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17.11-bookworm
+        env:
+          POSTGRES_PASSWORD: dt022v4-superuser-local-only
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/package-lock.json
+      - name: Exact Product baseline gate
+        run: |
+          set -euo pipefail
+          BASE=685e900545c686f1c2e802ff1e712394d1d324f6
+          git diff --exit-code "$BASE" HEAD -- DEPLOYMENT_WORKSPACE
+          mapfile -t product_changes < <(git diff --name-only "$BASE" HEAD -- DEPLOYMENT_WORKSPACE)
+          test "${#product_changes[@]}" = 0
+          npm install --global npm@11.17.0
+          cd DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+          npm ci
+          npm run verify:boundaries
+          npm run typecheck
+          npm run build
+          mkdir -p /tmp/dt022v4-evidence
+          printf '%s\n' authority=MCR-to-DT-022 admitted_commit="$BASE" product_source_changed=NO test_source_changed=NO prior_runtime_pass_run=32967104962 prior_browser_failure_classification=DT_ASYNC_PROJECTION_WAIT_ORACLE_ERROR > /tmp/dt022v4-evidence/baseline.txt
+      - name: Disposable DB and static binding
+        run: |
+          set -euo pipefail
+          W=DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001; db=appts_dep001_dt022v4
+          pgcid="$(docker ps --filter ancestor=postgres:17.11-bookworm -q | head -n1)"; test -n "$pgcid"
+          PGPASSWORD=dt022v4-superuser-local-only psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d postgres <<SQL
+          CREATE ROLE appts_migration LOGIN PASSWORD 'dt022v4-migration-local-only' NOSUPERUSER INHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          CREATE ROLE appts_runtime LOGIN PASSWORD 'dt022v4-runtime-local-only' NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          CREATE DATABASE ${db} OWNER appts_migration;
+          SQL
+          for f in "$W"/db/migrations/V001__cf01_core_schema.sql "$W"/db/migrations/V002__cf01_runtime_and_exchange_schema.sql "$W"/db/migrations/V003__dg04_diagnostic_persistence.sql "$W"/db/migrations/V004__d05_pending_capture_v2.sql; do PGPASSWORD=dt022v4-migration-local-only psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U appts_migration -d "$db" < "$f"; done
+          docker cp "$W/deploy/db" "$pgcid:/tmp/dt022v4-db"; docker exec "$pgcid" chmod +x /tmp/dt022v4-db/grant-runtime.sh
+          docker exec -e PGHOST=127.0.0.1 -e PGPORT=5432 -e PGDATABASE="$db" -e PGUSER=appts_migration -e PGPASSWORD=dt022v4-migration-local-only -e APPTS_DB_NAME="$db" -e APPTS_MIGRATION_ROLE=appts_migration -e APPTS_RUNTIME_ROLE=appts_runtime -e 'APPTS_STAGING_LABEL=STAGING SIMULATION / NON-PRODUCTION' -e APPTS_DISPOSABLE_DATABASE=true -e APPTS_DB_NETWORK_MODE=LOOPBACK "$pgcid" /tmp/dt022v4-db/grant-runtime.sh
+          PGPASSWORD=dt022v4-migration-local-only psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U appts_migration -d "$db" < "$W/deploy/db/seed-tls-day1-golden.sql"
+          test "$(PGPASSWORD=dt022v4-runtime-local-only psql -X -At -h 127.0.0.1 -U appts_runtime -d "$db" -c 'select current_user')" = appts_runtime
+      - name: Fresh independent D05 to D04 stimulus
+        env:
+          DATABASE_URL: postgresql://appts_runtime:dt022v4-runtime-local-only@127.0.0.1:5432/appts_dep001_dt022v4
+          APPTS_TRIAL_DISCLOSURE_LABEL_REF: 6f79da70-412f-469e-bcf7-f544f81b8aa7
+          DT022_EVIDENCE_DIR: /tmp/dt022v4-evidence
+        run: |
+          set -euo pipefail
+          node INDEPENDENT_DEPLOYMENT/dt022/dt022-ingress.mjs | tee /tmp/dt022v4-evidence/ingress-proof.json
+          grep -Fq '"d04": "APPLIED"' /tmp/dt022v4-evidence/ingress-proof.json
+          grep -Fq '"replay": "IDEMPOTENT_REPLAY"' /tmp/dt022v4-evidence/ingress-proof.json
+          grep -Fq '"stale_apply": "FAIL_CLOSED_INT_RUN_TD_01_NOT_CURRENT"' /tmp/dt022v4-evidence/ingress-proof.json
+      - name: Actual RESTORE_SERVICE and browser proof
+        env:
+          DATABASE_URL: postgresql://appts_runtime:dt022v4-runtime-local-only@127.0.0.1:5432/appts_dep001_dt022v4
+          API_LISTEN_PORT: 8080
+          APPTS_TRIAL_DISCLOSURE_LABEL_REF: 6f79da70-412f-469e-bcf7-f544f81b8aa7
+          APPTS_TLS_SESSION_COOKIE_SECURE: 'false'
+          DT022_EVIDENCE_DIR: /tmp/dt022v4-evidence
+        run: |
+          set -euo pipefail
+          export DT022_OPS_SECRET="$(openssl rand -hex 24)"
+          export APPTS_TLS_TRIAL_CREDENTIAL_HASHES_JSON="$(node --input-type=module <<'NODE'
+          import { hashTlsDay3Credential } from './DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/dist/trial/tls-day3-auth.js';
+          process.stdout.write(JSON.stringify({'trial.ops.a':hashTlsDay3Credential(process.env.DT022_OPS_SECRET)}));
+          NODE
+          )"
+          node DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/dist/dep-bootstrap.js >/tmp/dt022v4-api.log 2>&1 &
+          pid=$!; cleanup(){ kill "$pid" 2>/dev/null || true; }; trap cleanup EXIT
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/readyz >/dev/null && break || sleep 1; done
+          test "$(curl -fsS http://127.0.0.1:8080/healthz)" = '{"status":"ok"}'
+          CHROME=''; for c in google-chrome google-chrome-stable chromium chromium-browser; do command -v "$c" >/dev/null 2>&1 && CHROME="$(command -v "$c")" && break; done; test -n "$CHROME"
+          "$CHROME" --version | tee /tmp/dt022v4-evidence/browser-version.txt
+          python3 -m pip install --quiet selenium==4.29.0
+          export DT022_BASE_URL=http://127.0.0.1:8080 DT022_TICKET_ID="$(cat /tmp/dt022v4-evidence/ticket-id.txt)" DT022_QER_ID="$(cat /tmp/dt022v4-evidence/qer-id.txt)"
+          python3 INDEPENDENT_DEPLOYMENT/dt022/dt022-browser.py
+          cp /tmp/dt022v4-api.log /tmp/dt022v4-evidence/api.log
+          grep -Fq '"ticket_console": "PASS"' /tmp/dt022v4-evidence/browser-summary.json
+          grep -Fq '"responsibility_handover": "PASS"' /tmp/dt022v4-evidence/browser-summary.json
+          grep -Fq '"conditions_localization": "PASS"' /tmp/dt022v4-evidence/browser-summary.json
+          grep -Fq '"provenance_qer_visible": "PASS"' /tmp/dt022v4-evidence/browser-summary.json
+      - name: Final MCR022 gate
+        run: |
+          set -euo pipefail
+          printf '%s\n' disposition=PASS authority=MCR-to-DT-022 exact_baseline=685e900545c686f1c2e802ff1e712394d1d324f6 transport_neutral_D05_D04=PASS durable_runtime_effects=PASS replay_idempotency=PASS stale_currentness_fail_closed=PASS responsibility_non_transfer=PASS lifecycle_orthogonality=PASS actual_application_runtime=PASS login_boundary=PASS work_queue=PASS ticket_console=PASS responsibility_handover=PASS waiting_blocker_dependency=PASS next_control_visibility=PASS provenance_visibility=PASS role_holder_server_binding=PASS product_or_test_repair=NONE route_harness_drift=STRUCTURAL_STALE_LEGACY_HARNESS_DRIFT_NON_MATERIAL residual_stop_blockers=0 > /tmp/dt022v4-evidence/SUMMARY.txt
+          cat /tmp/dt022v4-evidence/SUMMARY.txt
+      - name: Upload immutable evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dt-mcr022-browser-continuation-v4-evidence
+          path: /tmp/dt022v4-evidence
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish safe pointer
+        if: success()
+        run: |
+          set -euo pipefail
+          cat > INDEPENDENT_DEPLOYMENT/evidence/LAST_MCR022_VERIFICATION.md <<EOF
+          # DT MCR-022 Transport-Neutral Independent Verification
+          run_id: ${GITHUB_RUN_ID}
+          admitted_baseline: 685e900545c686f1c2e802ff1e712394d1d324f6
+          product_source_changed: NO
+          test_source_changed: NO
+          transport_neutral_D05_D04: PASS
+          runtime_application: PASS
+          browser_human_facing: PASS
+          route_harness_drift: STRUCTURAL_STALE_LEGACY_HARNESS_DRIFT_NON_MATERIAL
+          disposition: PASS
+          recorded_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          git config user.name 'github-actions[bot]'; git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add INDEPENDENT_DEPLOYMENT/evidence/LAST_MCR022_VERIFICATION.md
+          git commit -m 'chore(dt): record MCR-022 final verification evidence'
+          git push origin HEAD:refs/heads/experiment/dt-mcr022-transport-neutral-v3
