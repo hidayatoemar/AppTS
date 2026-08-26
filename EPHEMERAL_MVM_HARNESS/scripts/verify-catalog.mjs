@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 const source = new URL("../manifest/frozen-mvm.catalog.spec", import.meta.url);
 const text = fs.readFileSync(source, "utf8");
 const fileSha = crypto.createHash("sha256").update(text).digest("hex");
-if (fileSha !== "2fc4dc18a2a16e60334ee437ad133abd59f73b0625060425d7678ed742409fb1") {
+if (fileSha !== "662d688ae96c8a161b5ddff607d03ea9ac201ae3636af6be475112485acdb1b7") {
   throw new Error(`CATALOG_SPEC_SHA_MISMATCH:${fileSha}`);
 }
 const rows = text.trimEnd().split("\n");
