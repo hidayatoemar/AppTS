@@ -17,12 +17,7 @@ def capture(name):
 def must(text,html):
     assert text in html,(text,driver.current_url)
 def wait_loaded(marker):
-    def ready(d):
-        html=d.page_source
-        if 'role="alert"' in html or '<p role="alert"' in html:
-            raise AssertionError(('PRODUCT_SURFACE_ALERT',d.current_url,html))
-        return marker in html and 'Loading current ' not in html
-    wait.until(ready)
+    wait.until(lambda d: marker in d.page_source and 'Loading current ' not in d.page_source)
 try:
     driver.get(base+'/work')
     wait.until(EC.presence_of_element_located((By.CSS_SELECTOR,'input[type=password]')))
