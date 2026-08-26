@@ -1,0 +1,382 @@
+name: DT MCR022 transport-neutral independent verification v2
+on:
+  push:
+    branches:
+      - experiment/dt-mcr022-transport-neutral-v2
+    paths:
+      - '.github/workflows/dt-mcr022-transport-neutral-v2.yml'
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17.11-bookworm
+        env:
+          POSTGRES_PASSWORD: dt022v2-superuser-local-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        working-directory: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+    steps:
+      - name: Checkout exact-baseline DT branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bind exact accepted Node toolchain
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/package-lock.json
+
+      - name: Exact baseline and executable readiness gate
+        run: |
+          set -euo pipefail
+          BASE=685e900545c686f1c2e802ff1e712394d1d324f6
+          test "$(git rev-parse HEAD^)" = "$BASE"
+          test "$(git diff --name-only "$BASE" HEAD | wc -l)" = 1
+          test "$(git diff --name-only "$BASE" HEAD)" = '.github/workflows/dt-mcr022-transport-neutral-v2.yml'
+          git diff --exit-code "$BASE" HEAD -- . ':(exclude).github/workflows/dt-mcr022-transport-neutral-v2.yml'
+          npm install --global npm@11.17.0
+          test "$(node --version)" = v24.19.0
+          test "$(npm --version)" = 11.17.0
+          npm ci
+          npm run verify:boundaries
+          npm run typecheck
+          npm run build
+          npm run test:contracts
+          mkdir -p /tmp/dt022-evidence
+          printf '%s\n' \
+            'authority=MCR-to-DT-022' \
+            'admitted_commit=685e900545c686f1c2e802ff1e712394d1d324f6' \
+            'verification_configuration=ARC011_AI_VERIFICATION_NON_FACTUAL|ARC011_EXTERNAL_DEPENDENCY_MAPPING_V1|EXTERNAL_WAITING' \
+            'product_source_changed=NO' \
+            'test_source_changed=NO' \
+            'run1=32966220987' \
+            'run1_classification=DT_HARNESS_MECHANICAL_IMPORT_PATH_ERROR_BEFORE_PRODUCT_INVOCATION' \
+            'dt021_route_observation=21_CURRENT_VS_19_LEGACY' \
+            'dt021_route_classification=STRUCTURAL_STALE_LEGACY_HARNESS_DRIFT' \
+            > /tmp/dt022-evidence/baseline.txt
+
+      - name: Disposable PostgreSQL 17 least-privilege setup
+        run: |
+          set -euo pipefail
+          db=appts_dep001_dt022v2
+          pgcid="$(docker ps --filter ancestor=postgres:17.11-bookworm -q | head -n1)"
+          test -n "$pgcid"
+          PGPASSWORD=dt022v2-superuser-local-only psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d postgres <<SQL
+          CREATE ROLE appts_migration LOGIN PASSWORD 'dt022v2-migration-local-only' NOSUPERUSER INHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          CREATE ROLE appts_runtime LOGIN PASSWORD 'dt022v2-runtime-local-only' NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          CREATE DATABASE ${db} OWNER appts_migration;
+          SQL
+          for f in db/migrations/V001__cf01_core_schema.sql db/migrations/V002__cf01_runtime_and_exchange_schema.sql db/migrations/V003__dg04_diagnostic_persistence.sql db/migrations/V004__d05_pending_capture_v2.sql; do
+            PGPASSWORD=dt022v2-migration-local-only psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U appts_migration -d "$db" < "$f"
+          done
+          docker cp deploy/db "$pgcid:/tmp/dt022v2-db"
+          docker exec "$pgcid" chmod +x /tmp/dt022v2-db/grant-runtime.sh
+          docker exec \
+            -e PGHOST=127.0.0.1 -e PGPORT=5432 -e PGDATABASE="$db" \
+            -e PGUSER=appts_migration -e PGPASSWORD=dt022v2-migration-local-only \
+            -e APPTS_DB_NAME="$db" -e APPTS_MIGRATION_ROLE=appts_migration \
+            -e APPTS_RUNTIME_ROLE=appts_runtime \
+            -e 'APPTS_STAGING_LABEL=STAGING SIMULATION / NON-PRODUCTION' \
+            -e APPTS_DISPOSABLE_DATABASE=true -e APPTS_DB_NETWORK_MODE=LOOPBACK \
+            "$pgcid" /tmp/dt022v2-db/grant-runtime.sh
+          set +e
+          PGPASSWORD=dt022v2-runtime-local-only psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U appts_runtime -d "$db" < deploy/db/seed-tls-day1-golden.sql >/tmp/dt022v2-runtime-seed.out 2>/tmp/dt022v2-runtime-seed.err
+          rc=$?
+          set -e
+          test "$rc" -ne 0
+          grep -qi 'must not run as appts_runtime' /tmp/dt022v2-runtime-seed.err
+          PGPASSWORD=dt022v2-migration-local-only psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U appts_migration -d "$db" < deploy/db/seed-tls-day1-golden.sql
+          test "$(PGPASSWORD=dt022v2-runtime-local-only psql -X -At -h 127.0.0.1 -U appts_runtime -d "$db" -c 'select current_user')" = appts_runtime
+          printf '%s\n' 'database=appts_dep001_dt022v2' 'runtime_identity=appts_runtime' 'network=loopback' 'classification=STAGING_SIMULATION_NON_PRODUCTION' > /tmp/dt022-evidence/runtime-context.txt
+
+      - name: Independent transport-neutral INT-RUN-TD-01 D05 to D04 proof
+        env:
+          DATABASE_URL: postgresql://appts_runtime:dt022v2-runtime-local-only@127.0.0.1:5432/appts_dep001_dt022v2
+          APPTS_TRIAL_DISCLOSURE_LABEL_REF: 6f79da70-412f-469e-bcf7-f544f81b8aa7
+        run: |
+          set -euo pipefail
+          cat > .dt022-ingress.mjs <<'NODE'
+          import assert from 'node:assert/strict';
+          import { createHash, randomUUID } from 'node:crypto';
+          import { writeFileSync } from 'node:fs';
+          import { createPersistencePool } from './packages/persistence/dist/index.js';
+          import { createTlsDay1GoldenDispatcher, TLS_DAY1_GOLDEN_CONTEXT } from './apps/api/dist/trial/tls-day1-golden-flow.js';
+          import { establishArc011AiVerificationBindings, ARC011_AI_VERIFICATION_CONTEXT, ARC011_AI_VERIFICATION_MAPPING_PROFILE } from './apps/api/dist/trial/arc011-ai-verification-context.js';
+          import { persistQualifiedExternalRecord } from './apps/api/dist/runtime/d05-qualified-external-record-ingress.js';
+          import { applyQualifiedExternalDependency } from './apps/api/dist/runtime/d04-external-dependency-owner.js';
+
+          const databaseUrl=process.env.DATABASE_URL;
+          const disclosureLabelRef=process.env.APPTS_TRIAL_DISCLOSURE_LABEL_REF;
+          assert.ok(databaseUrl); assert.ok(disclosureLabelRef);
+          const pool=createPersistencePool({connectionString:databaseUrl});
+          const fallback=Object.freeze({async dispatch(){throw new Error('DT022_FALLBACK_DISPATCH_NOT_EXPECTED');},async capture(){throw new Error('DT022_FALLBACK_CAPTURE_NOT_EXPECTED');}});
+          try {
+            const day1=createTlsDay1GoldenDispatcher(pool,fallback);
+            const formed=await day1.dispatch('APPTS.CORE.D01.PRETICKET_ADMISSION.SUBMISSION / 1.0.0',{
+              messageId:randomUUID(),idempotencyKey:randomUUID(),correlationId:randomUUID(),trialContext:TLS_DAY1_GOLDEN_CONTEXT,
+            });
+            assert.equal(formed?.disposition,'CREATED'); assert.equal(typeof formed.ticketId,'string');
+            const ticketId=formed.ticketId;
+            const bindings=await establishArc011AiVerificationBindings(pool,ticketId,disclosureLabelRef);
+            const at=new Date().toISOString();
+            const qerId=randomUUID();
+            const payload=Object.freeze({
+              verification_context:ARC011_AI_VERIFICATION_CONTEXT,
+              dt_scenario:'MCR-to-DT-022-TRANSPORT-NEUTRAL-INDEPENDENT',
+              synthetic:true,non_production:true,non_factual:true,
+              source_event:'EXTERNAL_WAITING',external_subject_ref:bindings.externalSubjectRef,
+              harness_supplies_external_world_stimulus_only:true,
+              app_truth_written_by:'ACCEPTED_PRODUCT_D05_TO_D04_RUNTIME_PATH',
+            });
+            const record=Object.freeze({
+              qualified_external_record_id:qerId,
+              source_system_ref_id:bindings.sourceSystemRefId,
+              adapter_profile_ref_id:bindings.adapterProfileRefId,
+              external_record_identity:`DT022-EXT-WAIT-${randomUUID()}`,
+              external_record_version_ref:'1',subject_ref:bindings.externalSubjectRef,
+              qualification_result_ref:'QUALIFIED',source_time:at,received_at:at,
+              payload_or_reference_ref:payload,
+              payload_hash:createHash('sha256').update(JSON.stringify(payload)).digest('hex'),
+              currentness_ref:'CURRENT',
+            });
+            const d05=await persistQualifiedExternalRecord(pool,record,{disclosureLabelRef,payloadJsonSchemaVersionRef:'DT022_ARC011_SYNTHETIC_V1'});
+            assert.equal(d05.disposition,'QUALIFIED_PERSISTED');
+            const mapping=Object.freeze({
+              mappingProfileRef:ARC011_AI_VERIFICATION_MAPPING_PROFILE,ticketId,
+              dependencyTypeRef:'EXTERNAL_DEPENDENCY',dependencyStatusRef:'EXTERNAL_WAITING',
+              responsibilityId:bindings.responsibilityId,obligationOwnerRef:bindings.supportingAssignmentRef,
+              blockerOwnerRef:bindings.supportingAssignmentRef,nextControlOwnerRef:bindings.supportingAssignmentRef,
+              blockedWorkRef:bindings.blockedWorkRef,waitingReasonRef:'EXTERNAL_WAITING',blockerReasonRef:'UNRESOLVED_DEPENDENCY',
+              obligationClassRef:'DEPENDENCY_RESOLUTION',nextControlClassRef:'DEPENDENCY_REVIEW',
+              dueBasisRef:'MCR_TO_DT_022_SYNTHETIC_TRIGGER_ONLY',dueAt:at,nextEvaluationAt:at,
+              escalation:Object.freeze({sourceEscalationObligationRef:bindings.escalationObligationRef,routeRefCode:bindings.escalationRouteRefCode,interventionDueBasisRef:'MCR_TO_DT_022_SYNTHETIC_TRIGGER_ONLY'}),
+            });
+            const d04=await applyQualifiedExternalDependency(pool,d05.record,mapping);
+            assert.equal(d04.disposition,'APPLIED'); assert.equal(d04.responsibilityTransferred,false);
+            const d05Replay=await persistQualifiedExternalRecord(pool,record,{disclosureLabelRef,payloadJsonSchemaVersionRef:'DT022_ARC011_SYNTHETIC_V1'});
+            assert.equal(d05Replay.disposition,'IDEMPOTENT_REPLAY');
+            const d04Replay=await applyQualifiedExternalDependency(pool,d05Replay.record,mapping);
+            assert.equal(d04Replay.disposition,'IDEMPOTENT_REPLAY'); assert.deepEqual(d04Replay.refs,d04.refs);
+
+            const staleId=randomUUID();
+            const stalePayload=Object.freeze({...payload,dt_scenario:'MCR-to-DT-022-STALE-CURRENTNESS-NEGATIVE'});
+            const staleRecord=Object.freeze({...record,
+              qualified_external_record_id:staleId,external_record_identity:`DT022-STALE-${randomUUID()}`,
+              external_record_version_ref:'0',payload_or_reference_ref:stalePayload,
+              payload_hash:createHash('sha256').update(JSON.stringify(stalePayload)).digest('hex'),currentness_ref:'STALE',
+            });
+            const staleD05=await persistQualifiedExternalRecord(pool,staleRecord,{disclosureLabelRef,payloadJsonSchemaVersionRef:'DT022_ARC011_SYNTHETIC_V1'});
+            let staleApply='NOT_ATTEMPTED';
+            if(staleD05.disposition==='QUALIFIED_PERSISTED'){
+              try { await applyQualifiedExternalDependency(pool,staleD05.record,mapping); throw new Error('STALE_RECORD_UNEXPECTEDLY_APPLIED'); }
+              catch(error){ const message=error instanceof Error?error.message:String(error); assert.equal(message,'INT_RUN_TD_01_D05_DURABLE_RECORD_REQUIRED'); staleApply='FAIL_CLOSED_CURRENT_REQUIRED'; }
+            } else { assert.equal(staleD05.disposition,'NO_EFFECT'); staleApply=`D05_${staleD05.reason}`; }
+
+            const counts=await pool.query(`SELECT
+              (SELECT count(*)::int FROM appts.qualified_external_record WHERE qualified_external_record_id=$1) AS qer_count,
+              (SELECT count(*)::int FROM appts.dependency_context WHERE ticket_id=$2 AND evidence_ref=$1 AND dependency_status_ref='EXTERNAL_WAITING') AS dependency_count,
+              (SELECT count(*)::int FROM appts.operational_obligation WHERE ticket_id=$2 AND source_ref=$1 AND status_ref='OPEN') AS obligation_count,
+              (SELECT count(*)::int FROM appts.runtime_blocker WHERE ticket_id=$2 AND evidence_ref=$1 AND cleared_at IS NULL AND status_ref='OPEN') AS blocker_count,
+              (SELECT count(*)::int FROM appts.waiting_interval WHERE ticket_id=$2 AND ended_at IS NULL) AS waiting_count,
+              (SELECT count(*)::int FROM appts.residual_obligation WHERE ticket_id=$2 AND evidence_ref=$1 AND disposition_status_ref='OPEN') AS residual_count,
+              (SELECT count(*)::int FROM appts.next_control WHERE ticket_id=$2 AND source_obligation_ref=$3) AS next_control_count,
+              (SELECT count(*)::int FROM appts.runtime_escalation WHERE ticket_id=$2 AND evidence_ref=$1 AND status_ref='OPEN') AS escalation_count,
+              (SELECT count(*)::int FROM appts.responsibility_change WHERE ticket_id=$2) AS responsibility_change_count,
+              (SELECT aggregate_version::int FROM appts.runtime_ticket WHERE ticket_id=$2) AS aggregate_version,
+              (SELECT current_state_code FROM appts.runtime_ticket WHERE ticket_id=$2) AS lifecycle_state,
+              (SELECT count(*)::int FROM appts.dependency_context WHERE evidence_ref=$4) AS stale_dependency_count,
+              (SELECT count(*)::int FROM appts.runtime_blocker WHERE evidence_ref=$4) AS stale_blocker_count`,
+              [qerId,ticketId,d04.refs.obligationId,staleId]);
+            const durable=counts.rows[0];
+            for(const key of ['qer_count','dependency_count','obligation_count','blocker_count','waiting_count','residual_count','next_control_count','escalation_count']) assert.equal(durable[key],1,key);
+            assert.equal(durable.responsibility_change_count,0); assert.equal(durable.aggregate_version,0); assert.equal(durable.lifecycle_state,'ACCEPTED');
+            assert.equal(durable.stale_dependency_count,0); assert.equal(durable.stale_blocker_count,0);
+            const provenance=await pool.query(`SELECT q.qualified_external_record_id::text AS qer_id,q.external_record_identity,q.external_record_version_ref,q.currentness_ref,q.payload_hash,s.source_identity,s.source_version_or_profile_ref,a.adapter_profile_identity,a.adapter_profile_version::text AS adapter_profile_version FROM appts.qualified_external_record q JOIN appts.authoritative_source_ref s ON s.source_system_ref_id=q.source_system_ref_id JOIN appts.adapter_profile_ref a ON a.adapter_profile_ref_id=$2 WHERE q.qualified_external_record_id=$1`,[qerId,bindings.adapterProfileRefId]);
+            assert.equal(provenance.rowCount,1); assert.equal(provenance.rows[0].currentness_ref,'CURRENT');
+            const out={classification:'D2',authority:'MCR-to-DT-022',invocation_method:'DT-only harness -> accepted Product persistQualifiedExternalRecord -> accepted Product applyQualifiedExternalDependency',ticket_id:ticketId,qer_id:qerId,stale_qer_id:staleId,d05:d05.disposition,d04:d04.disposition,replay:d04Replay.disposition,stale_d05:staleD05.disposition,stale_apply:staleApply,responsibility_transferred:false,lifecycle_state:durable.lifecycle_state,aggregate_version:durable.aggregate_version,durable_counts:durable,provenance:provenance.rows[0],product_refs:d04.refs};
+            writeFileSync('/tmp/dt022-evidence/ticket-id.txt',ticketId+'\n');
+            writeFileSync('/tmp/dt022-evidence/qer-id.txt',qerId+'\n');
+            process.stdout.write(JSON.stringify(out,null,2)+'\n');
+          } finally { await pool.end(); }
+          NODE
+          cp .dt022-ingress.mjs /tmp/dt022-evidence/dt022-ingress-harness.mjs
+          node .dt022-ingress.mjs | tee /tmp/dt022-evidence/ingress-proof.json
+          ticket_id="$(cat /tmp/dt022-evidence/ticket-id.txt)"
+          qer_id="$(cat /tmp/dt022-evidence/qer-id.txt)"
+          test -n "$ticket_id"; test -n "$qer_id"
+          if grep -Eq 'INSERT[[:space:]]+INTO[[:space:]]+appts\.(dependency_context|runtime_blocker|waiting_interval|operational_obligation|next_control|runtime_ticket)' .dt022-ingress.mjs; then
+            echo 'DT harness contains prohibited canonical SQL write' >&2; exit 1
+          fi
+          rm .dt022-ingress.mjs
+
+      - name: Independent durable readback
+        run: |
+          set -euo pipefail
+          ticket_id="$(cat /tmp/dt022-evidence/ticket-id.txt)"
+          qer_id="$(cat /tmp/dt022-evidence/qer-id.txt)"
+          PGPASSWORD=dt022v2-migration-local-only psql -X -At -h 127.0.0.1 -U appts_migration -d appts_dep001_dt022v2 <<SQL | tee /tmp/dt022-evidence/durable-readback.txt
+          SELECT 'runtime_ticket='||count(*) FROM appts.runtime_ticket WHERE ticket_id='${ticket_id}'::uuid AND current_state_code='ACCEPTED' AND aggregate_version=0;
+          SELECT 'qer_current='||count(*) FROM appts.qualified_external_record WHERE qualified_external_record_id='${qer_id}'::uuid AND currentness_ref='CURRENT';
+          SELECT 'dependency='||count(*) FROM appts.dependency_context WHERE ticket_id='${ticket_id}'::uuid AND evidence_ref='${qer_id}'::uuid AND dependency_status_ref='EXTERNAL_WAITING';
+          SELECT 'waiting='||count(*) FROM appts.waiting_interval WHERE ticket_id='${ticket_id}'::uuid AND ended_at IS NULL;
+          SELECT 'blocker='||count(*) FROM appts.runtime_blocker WHERE ticket_id='${ticket_id}'::uuid AND evidence_ref='${qer_id}'::uuid AND cleared_at IS NULL;
+          SELECT 'obligation='||count(*) FROM appts.operational_obligation WHERE ticket_id='${ticket_id}'::uuid AND source_ref='${qer_id}'::uuid AND status_ref='OPEN';
+          SELECT 'next_control='||count(*) FROM appts.next_control WHERE ticket_id='${ticket_id}'::uuid;
+          SELECT 'escalation='||count(*) FROM appts.runtime_escalation WHERE ticket_id='${ticket_id}'::uuid AND evidence_ref='${qer_id}'::uuid AND status_ref='OPEN';
+          SELECT 'responsibility_change='||count(*) FROM appts.responsibility_change WHERE ticket_id='${ticket_id}'::uuid;
+          SQL
+          for expected in runtime_ticket=1 qer_current=1 dependency=1 waiting=1 blocker=1 obligation=1 next_control=1 escalation=1 responsibility_change=0; do grep -Fxq "$expected" /tmp/dt022-evidence/durable-readback.txt; done
+
+      - name: Start exact RESTORE_SERVICE runtime and exercise actual browser Product
+        env:
+          DATABASE_URL: postgresql://appts_runtime:dt022v2-runtime-local-only@127.0.0.1:5432/appts_dep001_dt022v2
+          API_LISTEN_PORT: 8080
+          APPTS_TRIAL_DISCLOSURE_LABEL_REF: 6f79da70-412f-469e-bcf7-f544f81b8aa7
+          APPTS_TLS_SESSION_COOKIE_SECURE: 'false'
+        run: |
+          set -euo pipefail
+          export DT022_OPS_SECRET="$(openssl rand -hex 24)"
+          export APPTS_TLS_TRIAL_CREDENTIAL_HASHES_JSON="$(node --input-type=module <<'NODE'
+          import { hashTlsDay3Credential } from './apps/api/dist/trial/tls-day3-auth.js';
+          process.stdout.write(JSON.stringify({'trial.ops.a':hashTlsDay3Credential(process.env.DT022_OPS_SECRET)}));
+          NODE
+          )"
+          node apps/api/dist/dep-bootstrap.js >/tmp/dt022-api.log 2>&1 &
+          pid=$!
+          cleanup(){ kill "$pid" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/readyz >/dev/null && break || sleep 1; done
+          test "$(curl -fsS http://127.0.0.1:8080/healthz)" = '{"status":"ok"}'
+          curl -fsS http://127.0.0.1:8080/readyz | tee /tmp/dt022-evidence/readyz.json
+          CHROME=""; for c in google-chrome google-chrome-stable chromium chromium-browser; do command -v "$c" >/dev/null 2>&1 && CHROME="$(command -v "$c")" && break; done
+          test -n "$CHROME"
+          "$CHROME" --version | tee /tmp/dt022-evidence/browser-version.txt
+          (chromedriver --version || true) | tee /tmp/dt022-evidence/chromedriver-version.txt
+          python3 -m pip install --quiet selenium==4.29.0
+          export DT022_BASE_URL=http://127.0.0.1:8080
+          export DT022_TICKET_ID="$(cat /tmp/dt022-evidence/ticket-id.txt)"
+          export DT022_QER_ID="$(cat /tmp/dt022-evidence/qer-id.txt)"
+          cat > /tmp/dt022-browser.py <<'PY'
+          import os,json
+          from pathlib import Path
+          from selenium import webdriver
+          from selenium.webdriver.common.by import By
+          from selenium.webdriver.support.ui import Select,WebDriverWait
+          from selenium.webdriver.support import expected_conditions as EC
+          from selenium.webdriver.chrome.options import Options
+
+          base=os.environ['DT022_BASE_URL']; ticket=os.environ['DT022_TICKET_ID']; qer=os.environ['DT022_QER_ID']; secret=os.environ['DT022_OPS_SECRET']
+          evidence=Path('/tmp/dt022-evidence')
+          options=Options(); options.add_argument('--headless=new'); options.add_argument('--no-sandbox'); options.add_argument('--disable-dev-shm-usage'); options.add_argument('--window-size=1440,1200')
+          driver=webdriver.Chrome(options=options); wait=WebDriverWait(driver,15)
+          def capture(name):
+            html=driver.page_source; (evidence/f'{name}.html').write_text(html); driver.save_screenshot(str(evidence/f'{name}.png')); return html
+          def must(text,html): assert text in html,(text,driver.current_url)
+          try:
+            driver.get(base+'/work'); wait.until(EC.presence_of_element_located((By.CSS_SELECTOR,'input[type=password]')))
+            html=capture('browser-01-login-from-protected-route'); must('AppTS Trial Login',html); must('trial.ops.a',html)
+            Select(driver.find_element(By.TAG_NAME,'select')).select_by_value('trial.ops.a')
+            driver.find_element(By.CSS_SELECTOR,'input[type=password]').send_keys(secret)
+            driver.find_element(By.CSS_SELECTOR,'button[type=submit]').click()
+            wait.until(lambda d:'/work' in d.current_url and 'Role-Scoped Work Queue' in d.page_source)
+            html=capture('browser-02-work-queue')
+            for s in ['Role-Scoped Work Queue','TRIAL-RS-RESPONSIBLE-ROLE-01','TRIAL-HOLDER-OPS-A',ticket,'Operational attention:','1 waiting','1 blocker','1 escalation','next governed control is available']: must(s,html)
+            driver.get(base+f'/tickets/{ticket}'); wait.until(lambda d:'Ticket Operational Console' in d.page_source)
+            html=capture('browser-03-ticket-console')
+            for s in ['Ticket Operational Console',ticket,'ACCEPTED','Operational attention:','1 waiting','1 blocker','1 escalation','a governed next control is available','Responsibility and Handover','Waiting, Blockers and Dependencies']: must(s,html)
+            driver.get(base+f'/tickets/{ticket}/responsibility'); wait.until(lambda d:'Responsibility and Handover' in d.page_source)
+            html=capture('browser-04-responsibility')
+            for s in ['Responsibility and Handover','One current Responsible Role is in force','Supporting work, dependency handling, and escalation do not by themselves transfer Ticket responsibility.']: must(s,html)
+            driver.get(base+f'/tickets/{ticket}/conditions'); wait.until(lambda d:'Waiting / Blocker / Dependency' in d.page_source)
+            html=capture('browser-05-conditions')
+            for s in ['Waiting / Blocker / Dependency','Open waiting:','Open blockers:','Represented dependencies:','Waiting and blockers are operational conditions; they are not Ticket lifecycle states.','Next governed control','Escalation','Closure remains withheld',qer]: must(s,html)
+            results={'login_boundary':'PASS','work_queue':'PASS','ticket_console':'PASS','responsibility_handover':'PASS','conditions_localization':'PASS','next_control_visibility':'PASS','provenance_qer_visible':'PASS','role_holder_server_binding':'PASS','ticket_id':ticket,'qer_id':qer}
+            (evidence/'browser-summary.json').write_text(json.dumps(results,indent=2))
+          finally: driver.quit()
+          PY
+          cp /tmp/dt022-browser.py /tmp/dt022-evidence/dt022-browser-harness.py
+          python3 /tmp/dt022-browser.py
+          cp /tmp/dt022-api.log /tmp/dt022-evidence/api.log
+
+      - name: Final invariant and evidence gate
+        run: |
+          set -euo pipefail
+          ticket_id="$(cat /tmp/dt022-evidence/ticket-id.txt)"
+          qer_id="$(cat /tmp/dt022-evidence/qer-id.txt)"
+          test -s /tmp/dt022-evidence/ingress-proof.json
+          test -s /tmp/dt022-evidence/browser-summary.json
+          grep -Fq '"replay": "IDEMPOTENT_REPLAY"' /tmp/dt022-evidence/ingress-proof.json
+          grep -Fq '"responsibility_transferred": false' /tmp/dt022-evidence/ingress-proof.json
+          grep -Fq '"lifecycle_state": "ACCEPTED"' /tmp/dt022-evidence/ingress-proof.json
+          grep -Fq '"aggregate_version": 0' /tmp/dt022-evidence/ingress-proof.json
+          grep -Fq '"provenance_qer_visible": "PASS"' /tmp/dt022-evidence/browser-summary.json
+          printf '%s\n' \
+            'disposition=PASS' \
+            'authority=MCR-to-DT-022' \
+            'exact_baseline=685e900545c686f1c2e802ff1e712394d1d324f6' \
+            'transport_neutral_INT_RUN_TD_01=PASS' \
+            'harness_external_stimulus_only=PASS' \
+            'product_d05_qualification_persistence=PASS' \
+            'product_d04_derivation_canonical_effects=PASS' \
+            'durable_qer_provenance_currentness=PASS' \
+            'dependency_waiting_blocker_obligation_next_control=PASS' \
+            'responsibility_non_transfer=PASS' \
+            'lifecycle_orthogonality=PASS' \
+            'replay_idempotency=PASS' \
+            'stale_currentness_fail_closed=PASS' \
+            'direct_canonical_harness_write=ABSENT' \
+            'actual_application_runtime=PASS' \
+            'actual_browser_product_surfaces=PASS' \
+            'role_holder_server_binding=PASS' \
+            'route_harness_drift=STRUCTURAL_STALE_LEGACY_HARNESS_DRIFT_NON_MATERIAL' \
+            "ticket_id=${ticket_id}" \
+            "qer_id=${qer_id}" \
+            > /tmp/dt022-evidence/SUMMARY.txt
+          cat /tmp/dt022-evidence/SUMMARY.txt
+
+      - name: Upload immutable DT MCR022 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dt-mcr022-transport-neutral-independent-evidence-v2
+          path: /tmp/dt022-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish safe DT MCR022 pointer
+        if: success()
+        run: |
+          set -euo pipefail
+          mkdir -p ../../../INDEPENDENT_DEPLOYMENT/evidence
+          cat > ../../../INDEPENDENT_DEPLOYMENT/evidence/LAST_MCR022_VERIFICATION.md <<EOF
+          # DT MCR-022 Transport-Neutral Independent Verification
+
+          run_id: ${GITHUB_RUN_ID}
+          verification_branch: experiment/dt-mcr022-transport-neutral-v2
+          admitted_baseline: 685e900545c686f1c2e802ff1e712394d1d324f6
+          product_source_changed: NO
+          test_source_changed: NO
+          transport_neutral_D05_D04: PASS
+          runtime_application: PASS
+          browser_human_facing: PASS
+          route_harness_drift: STRUCTURAL_STALE_LEGACY_HARNESS_DRIFT_NON_MATERIAL
+          disposition: PASS
+          recorded_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          cd ../../..
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add INDEPENDENT_DEPLOYMENT/evidence/LAST_MCR022_VERIFICATION.md
+          git commit -m 'chore(dt): record MCR-022 verification evidence'
+          git push origin HEAD:refs/heads/experiment/dt-mcr022-transport-neutral-v2
