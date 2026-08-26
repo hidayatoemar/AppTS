@@ -9,7 +9,16 @@ const compressedSha = crypto.createHash("sha256").update(compressed).digest("hex
 if (compressedSha !== "fdd34f71fb92623741a49e2f59b4dd48071960a26432bc55eecd7340d6d24e82") {
   throw new Error(`CATALOG_COMPRESSED_SHA_MISMATCH:${compressedSha}`);
 }
-const catalogText = zlib.gunzipSync(compressed).toString("utf8");
+let catalogBuffer;
+let transportMode = "GZIP_VALID";
+try {
+  catalogBuffer = zlib.gunzipSync(compressed);
+} catch (error) {
+  if (!(error && error.code === "Z_DATA_ERROR") || compressed.length <= 18 || compressed[0] !== 0x1f || compressed[1] !== 0x8b) throw error;
+  catalogBuffer = zlib.inflateRawSync(compressed.subarray(10, -8));
+  transportMode = "GZIP_TRAILER_INVALID_RAW_DEFLATE_RECOVERED";
+}
+const catalogText = catalogBuffer.toString("utf8");
 const catalogSha = crypto.createHash("sha256").update(catalogText).digest("hex");
 if (catalogSha !== "c14891f9ee412dc0afaee6b89d222a8fe4cf4fcf83da219ed54199aec136d71b") {
   throw new Error(`CATALOG_CONTENT_SHA_MISMATCH:${catalogSha}`);
@@ -51,6 +60,7 @@ const result = {
   disposition: "PASS",
   scope: "MCR066_CARRIER_CATALOG_READINESS_ONLY",
   no_frozen_campaign_credit: true,
+  transport_mode: transportMode,
   catalog_sha256: catalogSha,
   compressed_catalog_sha256: compressedSha,
   population: {
@@ -70,4 +80,5 @@ const result = {
 };
 fs.mkdirSync(new URL("../evidence/", import.meta.url), { recursive: true });
 fs.writeFileSync(new URL("../evidence/catalog-readiness.json", import.meta.url), JSON.stringify(result, null, 2) + "\n");
+fs.writeFileSync(new URL("../evidence/frozen-mvm.catalog.recovered.json", import.meta.url), catalogText + "\n");
 console.log(JSON.stringify(result));
