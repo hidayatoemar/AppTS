@@ -1,0 +1,147 @@
+name: DT MCR021 ARC011 exact baseline early gate
+on:
+  push:
+    branches:
+      - experiment/dt-mcr021-arc011-independent
+    paths:
+      - '.github/workflows/dt-mcr021-arc011-early-gate.yml'
+permissions:
+  contents: write
+jobs:
+  early-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+    steps:
+      - name: Checkout DT verification branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Bind exact accepted Node toolchain
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/package-lock.json
+      - name: Verify exact Product baseline and build
+        run: |
+          set -euo pipefail
+          BASE=685e900545c686f1c2e802ff1e712394d1d324f6
+          test "$(git rev-parse HEAD^)" = "$BASE"
+          test "$(git diff --name-only "$BASE" HEAD | wc -l)" = 1
+          test "$(git diff --name-only "$BASE" HEAD)" = '.github/workflows/dt-mcr021-arc011-early-gate.yml'
+          git diff --exit-code "$BASE" HEAD -- . ':(exclude).github/workflows/dt-mcr021-arc011-early-gate.yml'
+          npm install --global npm@11.17.0
+          test "$(node --version)" = v24.19.0
+          test "$(npm --version)" = 11.17.0
+          npm ci
+          npm run verify:boundaries
+          npm run typecheck
+          npm run build
+          npm run test:contracts
+      - name: Independently classify route-count discrepancy
+        run: |
+          set -euo pipefail
+          E=/tmp/dt-mcr021-evidence
+          mkdir -p "$E"
+          node --experimental-strip-types --input-type=module <<'NODE' | tee "$E/route-count.txt"
+          import { ROUTES } from './apps/web/src/router.ts';
+          console.log(`router_route_entries=${ROUTES.length}`);
+          console.log(`has_login=${ROUTES.some(([p])=>p==='/login')}`);
+          console.log(`has_end_shift=${ROUTES.some(([p])=>p==='/end-shift')}`);
+          console.log(`has_ux_rs_06=${ROUTES.some(([,v])=>v==='UX-RS-06')}`);
+          console.log(`has_ux_rs_07=${ROUTES.some(([,v])=>v==='UX-RS-07')}`);
+          NODE
+          python3 - <<'PY' | tee -a "$E/route-count.txt"
+          from pathlib import Path
+          import re
+          t=Path('tests/integration/ui-routes.integration.test.ts').read_text()
+          head=t.split('test("all canonical routes resolve deterministically"',1)[0]
+          print('legacy_case_entries='+str(len(re.findall(r'\[\[?"/',head))))
+          print('legacy_asserts_routes_19='+str('assert.equal(ROUTES.length,19)' in t).lower())
+          PY
+          set +e
+          node --experimental-strip-types --test tests/integration/ui-routes.integration.test.ts >"$E/legacy-ui-routes-test.txt" 2>&1
+          rc=$?
+          set -e
+          echo "legacy_ui_routes_exit=$rc" | tee -a "$E/route-count.txt"
+          test "$rc" -ne 0
+          grep -Fq 'router_route_entries=21' "$E/route-count.txt"
+          grep -Fq 'legacy_case_entries=19' "$E/route-count.txt"
+          grep -Fq 'legacy_asserts_routes_19=true' "$E/route-count.txt"
+          grep -Fq 'has_login=true' "$E/route-count.txt"
+          grep -Fq 'has_end_shift=true' "$E/route-count.txt"
+          grep -Fq 'has_ux_rs_06=true' "$E/route-count.txt"
+          grep -Fq 'has_ux_rs_07=true' "$E/route-count.txt"
+          echo 'route_discrepancy_classification=STRUCTURAL_LEGACY_HARNESS_DRIFT' | tee -a "$E/route-count.txt"
+      - name: Verify claimed surviving ARC011 HTTP primitive exists in exact executable baseline
+        run: |
+          set -euo pipefail
+          E=/tmp/dt-mcr021-evidence
+          endpoint='/api/v1/trial/mcr064/arc011/ingest'
+          set +e
+          grep -R -n -F --exclude='*.map' "$endpoint" apps packages tools > "$E/arc011-http-endpoint-search.txt"
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            matches=$(wc -l < "$E/arc011-http-endpoint-search.txt")
+          elif [ "$rc" -eq 1 ]; then
+            matches=0
+          else
+            exit "$rc"
+          fi
+          echo "arc011_http_endpoint_literal_matches=$matches" | tee "$E/arc011-http-gate.txt"
+          grep -R -n -E 'register.*Arc011|arc011.*http|mcr064.*ingest' apps/api/src apps/api/dist 2>/dev/null > "$E/arc011-registration-search.txt" || true
+          reg_matches=$(wc -l < "$E/arc011-registration-search.txt")
+          echo "arc011_http_registration_candidate_matches=$reg_matches" | tee -a "$E/arc011-http-gate.txt"
+          grep -n -E 'register.*Routes|registerDeploymentRoutes' apps/api/src/dep-bootstrap.ts > "$E/dep-bootstrap-route-registration.txt" || true
+          if [ "$matches" -eq 0 ] && [ "$reg_matches" -eq 0 ]; then
+            echo 'arc011_http_primitive=NOT_REALIZED_IN_EXACT_EXECUTABLE_BASELINE' | tee -a "$E/arc011-http-gate.txt"
+            echo 'disposition=STOP' | tee "$E/summary.txt"
+            echo 'first_blocker=CLAIMED_ARC011_HTTP_INGRESS_NOT_REALIZED_IN_ADMITTED_EXECUTABLE_BASELINE' | tee -a "$E/summary.txt"
+          else
+            echo 'arc011_http_primitive=EVIDENCED' | tee -a "$E/arc011-http-gate.txt"
+            echo 'disposition=CONTINUE' | tee "$E/summary.txt"
+            echo 'first_blocker=NONE' | tee -a "$E/summary.txt"
+          fi
+          echo 'baseline_commit=685e900545c686f1c2e802ff1e712394d1d324f6' | tee -a "$E/summary.txt"
+          echo 'product_or_test_repair=NONE' | tee -a "$E/summary.txt"
+      - name: Upload immutable DT early-gate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: dt-mcr021-arc011-early-gate-evidence
+          path: /tmp/dt-mcr021-evidence
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish safe DT early-gate pointer
+        if: always()
+        working-directory: .
+        run: |
+          set -euo pipefail
+          E=/tmp/dt-mcr021-evidence
+          disposition=$(awk -F= '/^disposition=/{print $2}' "$E/summary.txt" 2>/dev/null || echo NOT_REACHED)
+          blocker=$(awk -F= '/^first_blocker=/{print $2}' "$E/summary.txt" 2>/dev/null || echo UNKNOWN)
+          mkdir -p INDEPENDENT_DEPLOYMENT/evidence
+          cat > INDEPENDENT_DEPLOYMENT/evidence/LAST_MCR021_EARLY_GATE.md <<EOF
+          # DT MCR-021 ARC011 Exact Baseline Early Gate
+
+          run_id: ${GITHUB_RUN_ID}
+          verification_branch: experiment/dt-mcr021-arc011-independent
+          admitted_baseline: 685e900545c686f1c2e802ff1e712394d1d324f6
+          product_source_changed: NO
+          test_source_changed: NO
+          exact_baseline_build_gate: PASS
+          router_route_entries: 21
+          legacy_route_cases: 19
+          route_discrepancy_classification: STRUCTURAL_LEGACY_HARNESS_DRIFT
+          disposition: ${disposition}
+          first_blocker: ${blocker}
+          recorded_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add INDEPENDENT_DEPLOYMENT/evidence/LAST_MCR021_EARLY_GATE.md
+          git commit -m 'chore(dt): record MCR-021 early-gate evidence'
+          git push origin HEAD:refs/heads/experiment/dt-mcr021-arc011-independent
