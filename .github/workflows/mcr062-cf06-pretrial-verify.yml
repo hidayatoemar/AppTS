@@ -1,0 +1,60 @@
+name: MCR062 CF06 pre-trial successor verification
+on:
+  push:
+    branches:
+      - codex/mcr062-cf06-pretrial-successor
+    paths:
+      - '.github/workflows/mcr062-cf06-pretrial-verify.yml'
+      - 'DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/**'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+    steps:
+      - name: Checkout exact successor branch
+        uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Set up Node 24.19.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/package-lock.json
+      - name: Pin npm 11.17.0
+        run: npm install --global npm@11.17.0
+      - name: Install exact dependencies
+        run: npm ci
+      - name: Preserve accepted schema and authority mechanics
+        run: |
+          set -euo pipefail
+          base=1887f8bd8ff0d433f8c6e3cc882245cf2d819a30
+          git diff --exit-code "$base" -- \
+            db/migrations/V001__cf01_core_schema.sql \
+            db/migrations/V002__cf01_runtime_and_exchange_schema.sql \
+            db/migrations/V003__dg04_diagnostic_persistence.sql \
+            db/migrations/V004__d05_pending_capture_v2.sql \
+            deploy/db/grant-runtime.sh \
+            apps/api/src/trial/pre-ticket-trial-owner-flow.ts \
+            apps/api/src/trial/tls-day1-golden-flow.ts \
+            apps/api/src/trial/tls-day2-arc001-flow.ts \
+            apps/api/src/trial/tls-day3-arc002-flow.ts \
+            apps/api/src/trial/tls-day3-auth.ts \
+            package-lock.json
+          ! grep -E '\b(INSERT|UPDATE|DELETE|TRUNCATE)\b' apps/api/src/projections/cf06-pretrial-projection-port.ts
+      - name: Architecture boundary
+        run: npm run verify:boundaries
+      - name: Full typecheck
+        run: npm run typecheck
+      - name: Full build
+        run: npm run build
+      - name: Contract regression
+        run: npm run test:contracts
+      - name: Adverse regression
+        run: npm run test:adverse
+      - name: Bounded candidate delta
+        run: git diff --name-status 1887f8bd8ff0d433f8c6e3cc882245cf2d819a30...HEAD
