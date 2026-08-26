@@ -4,22 +4,13 @@ import crypto from "node:crypto";
 const source = new URL("../manifest/frozen-mvm.catalog.spec", import.meta.url);
 const text = fs.readFileSync(source, "utf8");
 const fileSha = crypto.createHash("sha256").update(text).digest("hex");
-if (fileSha !== "662d688ae96c8a161b5ddff607d03ea9ac201ae3636af6be475112485acdb1b7") {
-  throw new Error(`CATALOG_SPEC_SHA_MISMATCH:${fileSha}`);
-}
+if (fileSha !== "662d688ae96c8a161b5ddff607d03ea9ac201ae3636af6be475112485acdb1b7") throw new Error(`CATALOG_SPEC_SHA_MISMATCH:${fileSha}`);
 const rows = text.trimEnd().split("\n");
 if (rows.shift() !== "APPTS_MCR066_FROZEN_MVM_CATALOG_SPEC_V1") throw new Error("CATALOG_SPEC_HEADER_MISMATCH");
 const splitList = (s) => s ? s.split(",") : [];
-const authority = { value: undefined };
-const credit = { value: undefined };
+const authority = { value: undefined }, credit = { value: undefined };
 let product;
-const sources = {};
-const aliases = [];
-const obligation_to_scenarios = {};
-const vp_to_carrier = {};
-const hrt_to_scenarios = {};
-const variant_to_scenario = {};
-const obligation_to_exact_variant = {};
+const sources = {}, aliases = [], obligation_to_scenarios = {}, vp_to_carrier = {}, hrt_to_scenarios = {}, variant_to_scenario = {}, obligation_to_exact_variant = {};
 for (const line of rows) {
   const p = line.split("|");
   switch (p[0]) {
@@ -63,39 +54,29 @@ for (const v of Object.values(hrt_to_scenarios)) v.forEach(x=>usedScenarios.add(
 Object.values(variant_to_scenario).forEach(x=>usedScenarios.add(x));
 const expectedScenarios = Array.from({length:35}, (_,i)=>`CS-${String(i+1).padStart(3,"0")}`);
 assert(expectedScenarios.every(x=>usedScenarios.has(x)) && usedScenarios.size === 35, "SCENARIO_POPULATION_NOT_EXACT_35");
-const requiredCs001Variants = ["V08-VP-034","V08-VP-070","V08-VP-142","V08-VP-479"];
-for (const id of requiredCs001Variants) assert(variant_to_scenario[id] === "CS-001", `CS001_VARIANT_BINDING_MISMATCH:${id}`);
+for (const id of ["V08-VP-034","V08-VP-070","V08-VP-142","V08-VP-479"]) assert(variant_to_scenario[id] === "CS-001", `CS001_VARIANT_BINDING_MISMATCH:${id}`);
 
-const semantic = {
-  authority: authority.value,
-  credit: credit.value,
-  product,
-  sources,
-  aliases: [...aliases].sort(),
-  obligation_to_scenarios,
-  vp_to_carrier,
-  hrt_to_scenarios,
-  variant_to_scenario,
-  obligation_to_exact_variant
+const canonicalize = (value) => Array.isArray(value) ? value.map(canonicalize) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonicalize(value[k])])) : value;
+const hash = (value) => crypto.createHash("sha256").update(JSON.stringify(canonicalize(value))).digest("hex");
+const sectionExpect = {
+  product:"5428a2b14072f61257844cd91d27b75ac0cf058e39b56579aee8db816bc7bd4d",
+  sources:"2e4e1bb262a24277a398e13c3bf0396c17db2e550b925fdb91b42be47b925a62",
+  aliases:"909deb20e25d3ba1425dbfcd0f759208bc8b82078716de2996dba96f170cd9f6",
+  obligation_to_scenarios:"7e802116d5aced1db30b5c55220037aa9215ea6466b9142241e91079a34ac24c",
+  vp_to_carrier:"634f763eb566c67f71e675c6b50af23bbbaaf4d1fe3512d077d8692cf5cb48b3",
+  hrt_to_scenarios:"50392eb2c0119423144797aabde843d5e0d6b3f727e7ae1b4a6752f60859f7c9",
+  variant_to_scenario:"8cb50bab417dc1d8dc780c7f3886770e9fa20bbaea507258cac4a3d2c6d39fad",
+  obligation_to_exact_variant:"d666596161a6850659b724ccdd9eeeaa6bb21595bb25e3c3a99c3e76e78d7839"
 };
-const canonicalize = (value) => Array.isArray(value)
-  ? value.map(canonicalize)
-  : value && typeof value === "object"
-    ? Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonicalize(value[k])]))
-    : value;
-const semanticText = JSON.stringify(canonicalize(semantic));
-const semanticSha = crypto.createHash("sha256").update(semanticText).digest("hex");
-if (semanticSha !== "315296b07671988961cb8b8369dcab2c952ea2d93380941ff11c45f6bb128d14") {
-  throw new Error(`CATALOG_SEMANTIC_SHA_MISMATCH:${semanticSha}`);
+const sectionValues = { product, sources, aliases:[...aliases].sort(), obligation_to_scenarios, vp_to_carrier, hrt_to_scenarios, variant_to_scenario, obligation_to_exact_variant };
+for (const [name, expected] of Object.entries(sectionExpect)) {
+  const actual = hash(sectionValues[name]);
+  if (actual !== expected) throw new Error(`CATALOG_SECTION_SHA_MISMATCH:${name}:${actual}`);
 }
-const result = {
-  disposition:"PASS",
-  scope:"MCR066_CARRIER_CATALOG_READINESS_ONLY",
-  no_frozen_campaign_credit:true,
-  catalog_spec_sha256:fileSha,
-  catalog_semantic_sha256:semanticSha,
-  population:{ obligations:344, normalized_aliases:15, value_pairs:527, high_risk_tuples:42, scenarios:35, mandatory_variants:217, exact_f01_bindings:68 }
-};
+const semantic = { authority:authority.value, credit:credit.value, ...sectionValues };
+const semanticSha = hash(semantic);
+if (semanticSha !== "315296b07671988961cb8b8369dcab2c952ea2d93380941ff11c45f6bb128d14") throw new Error(`CATALOG_SEMANTIC_SHA_MISMATCH:${semanticSha}`);
+const result = {disposition:"PASS",scope:"MCR066_CARRIER_CATALOG_READINESS_ONLY",no_frozen_campaign_credit:true,catalog_spec_sha256:fileSha,catalog_semantic_sha256:semanticSha,population:{obligations:344,normalized_aliases:15,value_pairs:527,high_risk_tuples:42,scenarios:35,mandatory_variants:217,exact_f01_bindings:68}};
 fs.mkdirSync(new URL("../evidence/", import.meta.url), {recursive:true});
 fs.writeFileSync(new URL("../evidence/catalog-readiness.json", import.meta.url), JSON.stringify(result,null,2)+"\n");
 console.log(JSON.stringify(result));
