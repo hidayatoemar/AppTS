@@ -1,0 +1,62 @@
+name: MCR066 Ephemeral MVM Carrier Readiness
+
+on:
+  push:
+    branches:
+      - harness/mcr066-frozen-mvm-carrier
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  carrier-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout harness carrier
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup exact Node toolchain
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+
+      - name: Verify Product immutability and carrier identity
+        run: node EPHEMERAL_MVM_HARNESS/scripts/verify-product-boundary.mjs
+
+      - name: Verify full frozen MVM population and crosswalk
+        run: node EPHEMERAL_MVM_HARNESS/scripts/verify-catalog.mjs
+
+      - name: Run CS-001 readiness-only smoke
+        run: node --experimental-strip-types EPHEMERAL_MVM_HARNESS/scripts/smoke-cs001.mjs
+
+      - name: Record workflow evidence identity
+        if: always()
+        shell: bash
+        run: |
+          cat > EPHEMERAL_MVM_HARNESS/evidence/workflow-identity.json <<EOF
+          {
+            "authority":"MCR-to-CODEX-066",
+            "scope":"HARNESS_READINESS_ONLY",
+            "no_frozen_campaign_credit":true,
+            "repository":"${GITHUB_REPOSITORY}",
+            "carrier_branch":"${GITHUB_REF_NAME}",
+            "carrier_commit":"${GITHUB_SHA}",
+            "workflow":"${GITHUB_WORKFLOW}",
+            "run_id":"${GITHUB_RUN_ID}",
+            "run_attempt":"${GITHUB_RUN_ATTEMPT}",
+            "runner_os":"${RUNNER_OS}"
+          }
+          EOF
+
+      - name: Upload controlled readiness evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcr066-ephemeral-mvm-carrier-readiness-evidence
+          path: EPHEMERAL_MVM_HARNESS/evidence/
+          if-no-files-found: error
+          retention-days: 90
