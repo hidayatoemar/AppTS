@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - harness/mcr066-frozen-mvm-carrier
+  pull_request:
+    branches:
+      - harness/mcr066-frozen-mvm-carrier
   workflow_dispatch:
 
 permissions:
@@ -17,12 +20,21 @@ jobs:
       - name: Checkout harness carrier
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Setup exact Node toolchain
         uses: actions/setup-node@v4
         with:
           node-version: 24.19.0
+
+      - name: Verify exact toolchain identity
+        shell: bash
+        run: |
+          test "$(node --version)" = "v24.19.0"
+          test "$(npm --version)" = "11.17.0"
+          node --version
+          npm --version
 
       - name: Verify Product immutability and carrier identity
         run: node EPHEMERAL_MVM_HARNESS/scripts/verify-product-boundary.mjs
@@ -43,12 +55,18 @@ jobs:
             "scope":"HARNESS_READINESS_ONLY",
             "no_frozen_campaign_credit":true,
             "repository":"${GITHUB_REPOSITORY}",
-            "carrier_branch":"${GITHUB_REF_NAME}",
-            "carrier_commit":"${GITHUB_SHA}",
+            "event":"${GITHUB_EVENT_NAME}",
+            "carrier_ref":"${GITHUB_REF_NAME}",
+            "workflow_checkout_head":"$(git rev-parse HEAD)",
+            "github_sha":"${GITHUB_SHA}",
+            "pr_head_sha":"${{ github.event.pull_request.head.sha }}",
+            "pr_base_sha":"${{ github.event.pull_request.base.sha }}",
             "workflow":"${GITHUB_WORKFLOW}",
             "run_id":"${GITHUB_RUN_ID}",
             "run_attempt":"${GITHUB_RUN_ATTEMPT}",
-            "runner_os":"${RUNNER_OS}"
+            "runner_os":"${RUNNER_OS}",
+            "node":"$(node --version)",
+            "npm":"$(npm --version)"
           }
           EOF
 
