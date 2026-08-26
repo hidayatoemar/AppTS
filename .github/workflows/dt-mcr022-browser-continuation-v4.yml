@@ -1,4 +1,4 @@
-name: DT MCR022 browser continuation v4
+name: DT MCR022 browser continuation v5
 on:
   push:
     branches:
@@ -42,7 +42,7 @@ jobs:
           npm run typecheck
           npm run build
           mkdir -p /tmp/dt022v4-evidence
-          printf '%s\n' authority=MCR-to-DT-022 admitted_commit="$BASE" product_source_changed=NO test_source_changed=NO prior_runtime_pass_run=32967104962 prior_browser_failure_classification=DT_ASYNC_PROJECTION_WAIT_ORACLE_ERROR > /tmp/dt022v4-evidence/baseline.txt
+          printf '%s\n' authority=MCR-to-DT-022 admitted_commit="$BASE" product_source_changed=NO test_source_changed=NO prior_runtime_pass_run=32967104962 run4=32967666681 run4_classification=DT_LOADING_CURRENTNESS_BANNER_MISCLASSIFIED_AS_PRODUCT_ALERT > /tmp/dt022v4-evidence/baseline.txt
       - name: Disposable DB and static binding
         run: |
           set -euo pipefail
@@ -107,7 +107,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dt-mcr022-browser-continuation-v4-evidence
+          name: dt-mcr022-browser-continuation-v5-evidence
           path: /tmp/dt022v4-evidence
           if-no-files-found: error
           retention-days: 90
