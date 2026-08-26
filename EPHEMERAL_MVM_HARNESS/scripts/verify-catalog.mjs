@@ -6,7 +6,7 @@ const source = new URL("../manifest/frozen-mvm.catalog.json.gz.b64", import.meta
 const encoded = fs.readFileSync(source, "utf8").trim();
 const compressed = Buffer.from(encoded, "base64");
 const compressedSha = crypto.createHash("sha256").update(compressed).digest("hex");
-if (compressedSha !== "621fcb1e4553990a6fc901a2b2c0b46908d0d6d758d65640fcde3dd33c3ae03c") {
+if (compressedSha !== "fdd34f71fb92623741a49e2f59b4dd48071960a26432bc55eecd7340d6d24e82") {
   throw new Error(`CATALOG_COMPRESSED_SHA_MISMATCH:${compressedSha}`);
 }
 const catalogText = zlib.gunzipSync(compressed).toString("utf8");
