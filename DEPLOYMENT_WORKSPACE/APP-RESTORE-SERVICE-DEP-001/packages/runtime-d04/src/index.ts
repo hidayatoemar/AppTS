@@ -4,6 +4,7 @@ export * from "./effect-engine.ts";
 export * from "./obligations.ts";
 export * from "./waiting-blockers.ts";
 export * from "./escalation.ts";
+export * from "./external-dependency.ts";
 export * from "./reconciliation.ts";
 export * from "./aoua.ts";
 export * from "./purpose-extension-host.ts";
