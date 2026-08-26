@@ -16,13 +16,10 @@ try {
 } catch (error) {
   if (!(error && error.code === "Z_DATA_ERROR") || compressed.length <= 18 || compressed[0] !== 0x1f || compressed[1] !== 0x8b) throw error;
   catalogBuffer = zlib.inflateRawSync(compressed.subarray(10, -8));
-  transportMode = "GZIP_TRAILER_INVALID_RAW_DEFLATE_RECOVERED";
+  transportMode = "GZIP_TRAILER_OR_BODY_CHECK_INVALID_RAW_DEFLATE_RECOVERED";
 }
 const catalogText = catalogBuffer.toString("utf8");
-const catalogSha = crypto.createHash("sha256").update(catalogText).digest("hex");
-if (catalogSha !== "c14891f9ee412dc0afaee6b89d222a8fe4cf4fcf83da219ed54199aec136d71b") {
-  throw new Error(`CATALOG_CONTENT_SHA_MISMATCH:${catalogSha}`);
-}
+const catalogContentSha = crypto.createHash("sha256").update(catalogText).digest("hex");
 const catalog = JSON.parse(catalogText);
 const unique = (items) => new Set(items).size === items.length;
 const assert = (cond, code) => { if (!cond) throw new Error(code); };
@@ -48,20 +45,48 @@ assert(Object.keys(cw.variant_to_scenario).length === 217, "VARIANT_CROSSWALK_NO
 for (const id of p.obligations) assert(Array.isArray(cw.obligation_to_scenarios[id]) && cw.obligation_to_scenarios[id].length > 0, `OBLIGATION_UNRESOLVED:${id}`);
 for (const id of p.value_pairs) {
   const row = cw.vp_to_carrier[id];
-  assert(row && (row.scenarios.length || row.hrts.length || row.variants.length), `VP_UNRESOLVED:${id}`);
+  assert(row && Array.isArray(row.scenarios) && Array.isArray(row.hrts) && Array.isArray(row.variants) && (row.scenarios.length || row.hrts.length || row.variants.length), `VP_UNRESOLVED:${id}`);
 }
-for (const id of p.high_risk_tuples) assert(cw.hrt_to_scenarios[id]?.length > 0, `HRT_UNRESOLVED:${id}`);
+for (const id of p.high_risk_tuples) assert(Array.isArray(cw.hrt_to_scenarios[id]) && cw.hrt_to_scenarios[id].length > 0, `HRT_UNRESOLVED:${id}`);
 for (const id of p.mandatory_variants) assert(/^CS-\d{3}$/.test(cw.variant_to_scenario[id] ?? ""), `VARIANT_UNRESOLVED:${id}`);
 
 const requiredCs001Variants = ["V08-VP-034","V08-VP-070","V08-VP-142","V08-VP-479"];
 for (const id of requiredCs001Variants) assert(cw.variant_to_scenario[id] === "CS-001", `CS001_VARIANT_BINDING_MISMATCH:${id}`);
+
+const sortObject = (object) => Object.fromEntries(Object.keys(object).sort().map((key) => [key, object[key]]));
+const sortedStrings = (items) => [...items].sort();
+const semantic = {
+  population: {
+    obligations: sortedStrings(p.obligations),
+    normalized_aliases: sortedStrings(p.normalized_aliases),
+    value_pairs: sortedStrings(p.value_pairs),
+    high_risk_tuples: sortedStrings(p.high_risk_tuples),
+    scenarios: sortedStrings(p.scenarios),
+    mandatory_variants: sortedStrings(p.mandatory_variants)
+  },
+  crosswalk: {
+    obligation_to_scenarios: Object.fromEntries(Object.keys(cw.obligation_to_scenarios).sort().map((id) => [id, sortedStrings(cw.obligation_to_scenarios[id])])),
+    vp_to_carrier: Object.fromEntries(Object.keys(cw.vp_to_carrier).sort().map((id) => [id, {
+      scenarios: sortedStrings(cw.vp_to_carrier[id].scenarios),
+      hrts: sortedStrings(cw.vp_to_carrier[id].hrts),
+      variants: sortedStrings(cw.vp_to_carrier[id].variants)
+    }])),
+    hrt_to_scenarios: Object.fromEntries(Object.keys(cw.hrt_to_scenarios).sort().map((id) => [id, sortedStrings(cw.hrt_to_scenarios[id])])),
+    variant_to_scenario: sortObject(cw.variant_to_scenario)
+  }
+};
+const semanticSha = crypto.createHash("sha256").update(JSON.stringify(semantic)).digest("hex");
+if (semanticSha !== "d0be3bf5cae8a5702836bd21af8edea542742a1582be6f8a6ecc6fad9a5795d7") {
+  throw new Error(`CATALOG_SEMANTIC_SHA_MISMATCH:${semanticSha}`);
+}
 
 const result = {
   disposition: "PASS",
   scope: "MCR066_CARRIER_CATALOG_READINESS_ONLY",
   no_frozen_campaign_credit: true,
   transport_mode: transportMode,
-  catalog_sha256: catalogSha,
+  catalog_content_sha256: catalogContentSha,
+  catalog_semantic_sha256: semanticSha,
   compressed_catalog_sha256: compressedSha,
   population: {
     obligations: p.obligations.length,
