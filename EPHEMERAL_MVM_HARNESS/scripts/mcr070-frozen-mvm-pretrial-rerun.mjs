@@ -65,9 +65,9 @@ if (exec(`git rev-parse ${ACCEPTED_CARRIER.commit}^{tree}`, { cwd: root }) !== A
 const productDiff = exec(`git diff --name-only ${PRODUCT.commit} -- ${productRel}`, { cwd: root });
 if (productDiff) throw new Error(`PRODUCT_MUTATION:${productDiff}`);
 
-const acceptedTestCmd = "node --experimental-strip-types --test tests/adverse/ui-stale-offline.adverse.test.ts";
+const acceptedTestCmd = "node --experimental-strip-types --test tests/adverse/ui-stale-offline.adverse.test.ts && printf '\\nMCR070_ACCEPTED_TEST_EXIT_ZERO\\n'";
 const acceptedTestOutput = exec(acceptedTestCmd, { cwd: productRoot });
-if (!acceptedTestOutput.includes("# fail 0")) throw new Error("ACCEPTED_UI_STALE_OFFLINE_TEST_NOT_PASSING_FRESH");
+if (!acceptedTestOutput.includes("MCR070_ACCEPTED_TEST_EXIT_ZERO")) throw new Error("ACCEPTED_UI_STALE_OFFLINE_TEST_NOT_PASSING_FRESH");
 
 const pendingSource = fs.readFileSync(path.resolve(productRoot, "apps/web/src/offline/pending-capture.ts"), "utf8");
 const swSource = fs.readFileSync(path.resolve(productRoot, "apps/web/src/offline/service-worker.ts"), "utf8");
