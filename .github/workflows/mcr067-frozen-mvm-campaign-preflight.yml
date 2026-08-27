@@ -61,7 +61,7 @@ jobs:
           MCR067_CONTROLLED_AVAILABILITY_BASIS_REF: ""
           MCR067_CONTROLLED_AVAILABILITY_EVIDENCE_REF: ""
           MCR067_MONTHLY_AVAILABILITY_OBSERVED: ""
-        run: node EPHEMERAL_MVM_HARNESS/scripts/mcr067-campaign-preflight.mjs
+        run: node EPHEMERAL_MVM_HARNESS/scripts/mcr067-campaign-preflight-v2.mjs
 
       - name: Record immutable workflow identity
         if: always()
