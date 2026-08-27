@@ -1,0 +1,79 @@
+name: MCR067 Frozen MVM Campaign Preflight
+
+on:
+  push:
+    branches:
+      - harness/mcr067-frozen-mvm-campaign-preflight
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  campaign-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact campaign extension head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Setup admitted Node toolchain
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+
+      - name: Verify exact toolchain identity
+        shell: bash
+        run: |
+          test "$(node --version)" = "v24.19.0"
+          test "$(npm --version)" = "11.17.0"
+          node --version
+          npm --version
+
+      - name: Verify immutable Product boundary
+        run: node EPHEMERAL_MVM_HARNESS/scripts/verify-product-boundary.mjs
+
+      - name: Verify frozen catalog identity
+        run: node EPHEMERAL_MVM_HARNESS/scripts/verify-catalog.mjs
+
+      - name: Execute fresh MCR067 campaign preflight
+        env:
+          MCR067_CONTROLLED_AVAILABILITY_BASIS_REF: ""
+          MCR067_CONTROLLED_AVAILABILITY_EVIDENCE_REF: ""
+          MCR067_MONTHLY_AVAILABILITY_OBSERVED: ""
+        run: node EPHEMERAL_MVM_HARNESS/scripts/mcr067-campaign-preflight.mjs
+
+      - name: Record immutable workflow identity
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p EPHEMERAL_MVM_HARNESS/evidence/mcr067
+          cat > EPHEMERAL_MVM_HARNESS/evidence/mcr067/workflow-identity.json <<EOF
+          {
+            "authority":"MCR-to-CODEX-067",
+            "scope":"FRESH_FROZEN_MVM_CAMPAIGN_PREFLIGHT",
+            "campaign_credit_awarded":false,
+            "repository":"${GITHUB_REPOSITORY}",
+            "ref":"${GITHUB_REF_NAME}",
+            "checkout_head":"$(git rev-parse HEAD)",
+            "checkout_tree":"$(git rev-parse HEAD^{tree})",
+            "workflow":"${GITHUB_WORKFLOW}",
+            "run_id":"${GITHUB_RUN_ID}",
+            "run_attempt":"${GITHUB_RUN_ATTEMPT}",
+            "runner_os":"${RUNNER_OS}",
+            "node":"$(node --version)",
+            "npm":"$(npm --version)"
+          }
+          EOF
+
+      - name: Upload controlled MCR067 preflight evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcr067-frozen-mvm-campaign-preflight-evidence
+          path: EPHEMERAL_MVM_HARNESS/evidence/mcr067/
+          if-no-files-found: error
+          retention-days: 90
