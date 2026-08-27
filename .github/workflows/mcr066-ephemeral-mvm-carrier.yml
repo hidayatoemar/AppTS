@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
       - harness/mcr066-frozen-mvm-carrier
+      - main
   workflow_dispatch:
 
 permissions:
@@ -17,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout harness carrier
+      - name: Checkout harness carrier head, never PR merge result
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
