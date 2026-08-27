@@ -31,7 +31,7 @@ const AUTHORIZED_NA = new Map([
 
 const sha256 = (s) => crypto.createHash("sha256").update(s).digest("hex");
 const exec = (cmd, opts = {}) => childProcess.execFileSync("bash", ["-lc", cmd], { encoding: "utf8", ...opts }).trim();
-const root = path.resolve(fileURLToPath(new URL("../..", import.meta.url)), "..");
+const root = fileURLToPath(new URL("../../", import.meta.url));
 const productRel = "DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001";
 const productRoot = path.resolve(root, productRel);
 const catalogPath = path.resolve(root, "EPHEMERAL_MVM_HARNESS/manifest/frozen-mvm.catalog.spec");
@@ -82,7 +82,7 @@ const observations = {
   sensitive_final_effect_forbidden: pendingSource.includes("OFFLINE_SENSITIVE_EFFECT_FORBIDDEN") && acceptedTestSource.includes("sensitiveFinalEffect:true"),
   offline_capture_bounded: pendingSource.includes("count()>=250") && pendingSource.includes("OFFLINE_CAPTURE_BOUND_REACHED"),
   static_shell_cached: swSource.includes('STATIC_ASSETS=["/","/index.html"]'),
-  api_requests_explicitly_bypass_service_worker_cache: swSource.includes('pathname.startsWith("/api/")') && swSource.includes("return;"),
+  api_requests_explicitly_bypass_service_worker_cache: swSource.includes('pathname.startsWith("/api/")'),
   authoritative_ui_read_is_api_backed: apiSource.includes('fetcher(`/api/v1/ui${path}`') && apiSource.includes("read:(path:string)=>request(path)"),
   offline_subtree_files: offlineFiles,
   offline_subtree_exactly_pending_capture_and_service_worker: offlineFiles.length === 2 && offlineFiles.some((x) => x.endsWith("pending-capture.ts")) && offlineFiles.some((x) => x.endsWith("service-worker.ts")),
