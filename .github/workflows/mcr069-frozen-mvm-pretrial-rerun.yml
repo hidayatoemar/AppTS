@@ -1,0 +1,98 @@
+name: MCR069 Frozen MVM Pre-Trial Rerun
+
+on:
+  push:
+    branches:
+      - harness/mcr069-frozen-mvm-pretrial-rerun
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-rerun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact rerun head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Setup admitted Node toolchain
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+
+      - name: Verify exact toolchain identity
+        shell: bash
+        run: |
+          test "$(node --version)" = "v24.19.0"
+          test "$(npm --version)" = "11.17.0"
+          node --version
+          npm --version
+
+      - name: Verify immutable Product and harness-only extension boundary
+        shell: bash
+        run: |
+          PRODUCT_COMMIT=685e900545c686f1c2e802ff1e712394d1d324f6
+          PRODUCT_TREE=440b4a5b2a402d929b0a398d51733e9bc1ede292
+          ACCEPTED_RERUN=d1bca986df2ca3ef6561c8566eb594da4b2f4ca2
+          ACCEPTED_RERUN_TREE=b5e7f384899701c331107fd8a4f42c7f7efc6ad3
+          test "$(git rev-parse ${PRODUCT_COMMIT}^{tree})" = "${PRODUCT_TREE}"
+          test "$(git rev-parse ${ACCEPTED_RERUN}^{tree})" = "${ACCEPTED_RERUN_TREE}"
+          test -z "$(git diff --name-only ${PRODUCT_COMMIT} -- DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001)"
+          git diff --name-only ${ACCEPTED_RERUN}..HEAD > /tmp/mcr069_changed_paths.txt
+          test -s /tmp/mcr069_changed_paths.txt
+          while IFS= read -r path; do
+            case "$path" in
+              EPHEMERAL_MVM_HARNESS/scripts/mcr069-frozen-mvm-pretrial-rerun.mjs) ;;
+              .github/workflows/mcr069-frozen-mvm-pretrial-rerun.yml) ;;
+              *) echo "MCR069_EXTENSION_BOUNDARY_VIOLATION:${path}"; exit 1 ;;
+            esac
+          done < /tmp/mcr069_changed_paths.txt
+          echo "MCR069_EXTENSION_BOUNDARY_PASS"
+          cat /tmp/mcr069_changed_paths.txt
+
+      - name: Verify frozen catalog identity
+        run: node EPHEMERAL_MVM_HARNESS/scripts/verify-catalog.mjs
+
+      - name: Execute fresh MCR069 zero-credit qualification rerun
+        env:
+          MCR069_D04_003_CONTROLLED_MAINTENANCE_BASIS_REF: ""
+          MCR069_D04_003_CONTROLLED_MAINTENANCE_EVIDENCE_REF: ""
+          MCR069_D04_003_MONTHLY_PLANNED_MAINTENANCE_HOURS: ""
+        run: node EPHEMERAL_MVM_HARNESS/scripts/mcr069-frozen-mvm-pretrial-rerun.mjs
+
+      - name: Record immutable workflow identity
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p EPHEMERAL_MVM_HARNESS/evidence/mcr069
+          cat > EPHEMERAL_MVM_HARNESS/evidence/mcr069/workflow-identity.json <<EOF
+          {
+            "authority":"MCR-to-CODEX-069",
+            "scope":"FRESH_ZERO_CREDIT_FROZEN_MVM_PRETRIAL_RERUN",
+            "campaign_credit_awarded":false,
+            "repository":"${GITHUB_REPOSITORY}",
+            "ref":"${GITHUB_REF_NAME}",
+            "checkout_head":"$(git rev-parse HEAD)",
+            "checkout_tree":"$(git rev-parse HEAD^{tree})",
+            "workflow":"${GITHUB_WORKFLOW}",
+            "run_id":"${GITHUB_RUN_ID}",
+            "run_attempt":"${GITHUB_RUN_ATTEMPT}",
+            "runner_os":"${RUNNER_OS}",
+            "node":"$(node --version)",
+            "npm":"$(npm --version)"
+          }
+          EOF
+
+      - name: Upload controlled MCR069 rerun evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcr069-frozen-mvm-pretrial-rerun-evidence
+          path: EPHEMERAL_MVM_HARNESS/evidence/mcr069/
+          if-no-files-found: error
+          retention-days: 90
