@@ -47,8 +47,8 @@ const nfrCommand = pkg?.scripts?.["test:nfr"] ?? null;
 const cf05Source = fs.readFileSync(new URL("tools/verify-cf05-harness.mjs", productRoot), "utf8");
 const staticRegistryEvidence = {
   command: nfrCommand,
-  expected_static_registry_command: "npm exec -- node tools/verify-cf05-harness.mjs",
-  command_matches_static_registry: nfrCommand === "npm exec -- node tools/verify-cf05-harness.mjs",
+  expected_static_registry_command: "node tools/verify-cf05-harness.mjs",
+  command_matches_static_registry: nfrCommand === "node tools/verify-cf05-harness.mjs",
   registered_case_population_71: cf05Source.includes("cases.length !== 71"),
   registered_status_static: cf05Source.includes('status: "REGISTERED"'),
   emits_registry_manifest_hash: cf05Source.includes("evidence_manifest_hash"),
