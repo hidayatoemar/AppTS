@@ -1,0 +1,227 @@
+name: DT MCR024 ARC013 fresh runtime browser B1 verification
+on:
+  push:
+    branches:
+      - experiment/dt-mcr024-arc013-readonly
+    paths:
+      - '.github/workflows/dt-mcr024-arc013-stage-b-runtime-browser.yml'
+permissions:
+  contents: read
+jobs:
+  runtime-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+    steps:
+      - name: Checkout exact corrected candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 1a3660db446f97924b4127c9ab95f42aefdb1a11
+          fetch-depth: 0
+      - name: Exact identity and non-mutation gate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 1a3660db446f97924b4127c9ab95f42aefdb1a11
+          test "$(git show -s --format=%T HEAD)" = 0893df33d6f73e0fed35a5b6d5fe9c6e39aeddc2
+          mkdir -p /tmp/dt024-stage-b
+          printf '%s\n' authority=MCR-to-DT-024 commit=1a3660db446f97924b4127c9ab95f42aefdb1a11 tree=0893df33d6f73e0fed35a5b6d5fe9c6e39aeddc2 product_mutation=NONE test_source_repair=NONE factual_entity_mapping=NONE > /tmp/dt024-stage-b/identity.txt
+      - name: Set up exact Node npm toolchain
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/package-lock.json
+      - name: Install and fresh build
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.17.0
+          npm ci
+          npm run verify:toolchain | tee /tmp/dt024-stage-b/toolchain.txt
+          npm run build | tee /tmp/dt024-stage-b/build.txt
+      - name: Prepare DT-only synthetic runtime composition
+        run: |
+          set -euo pipefail
+          cat > /tmp/dt024-runtime-server.mjs <<'NODE'
+          import { resolve } from 'node:path';
+          import { pathToFileURL } from 'node:url';
+          import { writeFileSync } from 'node:fs';
+          const root=process.cwd();
+          const mod=async p=>import(pathToFileURL(resolve(root,p)).href);
+          const { createDepBootstrapServer }=await mod('apps/api/dist/dep-bootstrap.js');
+          const { createEntityAxisProjectionPort }=await mod('apps/api/dist/projections/entity-axis-projection-port.js');
+          const { composeApi }=await mod('apps/api/dist/composition.js');
+          const TICKET='71000000-0000-4000-8000-000000000001';
+          const ENTITY='ENTITY-DT024-A';
+          const HOLDER='51010000-0000-4000-8000-00000000000a';
+          const ROLE='51010000-0000-4000-8000-000000000009';
+          const ASSIGN='51010000-0000-4000-8000-00000000000b';
+          const BASIS='AUTH-BASIS-DT024-A';
+          let dispatchCount=0;
+          writeFileSync('/tmp/dt024-stage-b/dispatch-count.txt','0\n');
+          const pool={
+            async query(sql,params){
+              const text=String(sql);
+              if(text.includes('FROM appts.runtime_ticket rt')) return {rowCount:1,rows:[{
+                ticket_entity_ref:ENTITY,authority_entity_ref:ENTITY,
+                acting_holder_ref:HOLDER,acting_role_instance_ref:ROLE,acting_assignment_ref:ASSIGN,authority_basis_ref:BASIS,
+                responsibility_entity_ref:ENTITY,responsibility_role_instance_ref:ROLE,responsibility_holder_ref:HOLDER,
+                assignment_entity_ref:ENTITY,assignment_role_instance_ref:ROLE,assignment_holder_ref:HOLDER,
+                assignment_ref:ASSIGN,assignment_authority_basis_ref:BASIS,
+              }]};
+              if(text.includes('SELECT ticket_id::text,entity_ref FROM appts.runtime_ticket')) return {rowCount:1,rows:[{ticket_id:TICKET,entity_ref:ENTITY}]};
+              throw new Error('DT024_UNEXPECTED_SYNTHETIC_QUERY');
+            }
+          };
+          const base={async read(viewId,subjectRef,concern,context){
+            const common={view_id:viewId,currentness_ref:'CURRENT',source_version_set_ref:'dt024:synthetic:current',data:{}};
+            if(viewId==='UX-RS-01') return {...common,data:{session_alias:context?.alias,session_role_ref:context?.role_ref,session_holder_ref:context?.holder_ref,tickets:[{ticket_id:TICKET,current_state_code:'ACCEPTED',aggregate_version:0,currentness_ref:'CURRENT'}]}};
+            if(viewId==='UX-RS-03') {
+              if(subjectRef!==TICKET) throw new Error('DT024_TICKET_NOT_FOUND');
+              return {...common,data:{ticket_id:TICKET,current_state_code:'ACCEPTED',aggregate_version:0,current_context_version:1,holder_ref:HOLDER,current_responsible_holder_ref:HOLDER,role_assignment_ref:ASSIGN,action_authority_assignment_ref:ASSIGN,authority_result_ref:'AUTH-DT024-A',gate_result_ref:'GATE-DT024-A',action_contract_ref:'INT-RUN-TD-05',available_actions:['ACTIVATE'],close_action_available:false,session_alias:context?.alias,session_role_ref:context?.role_ref,session_holder_ref:context?.holder_ref}};
+            }
+            if(viewId==='UX-RS-06') {
+              if(subjectRef!==TICKET) throw new Error('DT024_TICKET_NOT_FOUND');
+              return {...common,data:{current_responsibility:{responsibility_id:'RESP-DT024-A',role_instance_ref:ROLE,holder_ref:HOLDER,assignment_snapshot_ref:'SNAP-DT024-A',status_ref:'CURRENT',effective_from:'2026-08-28T00:00:00Z'},handover_proposals:[],runtime_handover_context:[]}};
+            }
+            throw new Error('UI_PROJECTION_NOT_AVAILABLE');
+          }};
+          const projections=createEntityAxisProjectionPort(pool,base);
+          const intents={
+            async dispatch(){dispatchCount++;writeFileSync('/tmp/dt024-stage-b/dispatch-count.txt',String(dispatchCount)+'\n');return {result:'UNEXPECTED_DISPATCH'};},
+            async capture(){throw new Error('DT024_CAPTURE_NOT_BOUND');}
+          };
+          const composition=composeApi({projections,intents,diagnostics:{async retrieve(){throw new Error('DIAGNOSTIC_AUTHORITY_BINDING_REQUIRED');}}});
+          const server=await createDepBootstrapServer({composition});
+          await server.app.listen({host:'127.0.0.1',port:8080});
+          writeFileSync('/tmp/dt024-stage-b/server-ready.txt','READY\n');
+          const shutdown=async()=>{writeFileSync('/tmp/dt024-stage-b/dispatch-count.txt',String(dispatchCount)+'\n');await server.close();process.exit(0);};
+          process.on('SIGTERM',()=>void shutdown());process.on('SIGINT',()=>void shutdown());
+          NODE
+      - name: Start actual RESTORE_SERVICE with ephemeral auth and DT synthetic ports
+        env:
+          DATABASE_URL: postgresql://dt024:unused@127.0.0.1:5432/dt024_unused
+          API_LISTEN_PORT: '8080'
+          APPTS_TLS_SESSION_COOKIE_SECURE: 'false'
+          APPTS_TRIAL_DISCLOSURE_LABEL_REF: 6f79da70-412f-469e-bcf7-f544f81b8aa7
+        run: |
+          set -euo pipefail
+          export DT024_SECRET="$(openssl rand -hex 24)"
+          export APPTS_TLS_TRIAL_CREDENTIAL_HASHES_JSON="$(node --input-type=module <<'NODE'
+          import { hashTlsDay3Credential } from './apps/api/dist/trial/tls-day3-auth.js';
+          process.stdout.write(JSON.stringify({'trial.ops.a':hashTlsDay3Credential(process.env.DT024_SECRET)}));
+          NODE
+          )"
+          printf '%s' "$DT024_SECRET" > /tmp/dt024-secret
+          chmod 600 /tmp/dt024-secret
+          nohup node /tmp/dt024-runtime-server.mjs >/tmp/dt024-stage-b/server.log 2>&1 &
+          echo $! >/tmp/dt024-server.pid
+          for i in $(seq 1 30); do test -f /tmp/dt024-stage-b/server-ready.txt && curl -fsS http://127.0.0.1:8080/healthz >/dev/null && break; sleep 1; done
+          test -f /tmp/dt024-stage-b/server-ready.txt
+          test "$(curl -fsS http://127.0.0.1:8080/healthz)" = '{"status":"ok"}'
+          echo RUNTIME_BOOT=PASS > /tmp/dt024-stage-b/runtime-stage.txt
+      - name: Executable API B1 fail-closed proof
+        env:
+          TICKET: 71000000-0000-4000-8000-000000000001
+        run: |
+          set -euo pipefail
+          secret="$(cat /tmp/dt024-secret)"
+          status="$(curl -sS -o /tmp/dt024-stage-b/unauth.json -w '%{http_code}' http://127.0.0.1:8080/api/v1/ui/tickets/$TICKET)"
+          test "$status" = 401
+          curl -fsS -c /tmp/dt024-cookie -H 'content-type: application/json' --data "{\"alias\":\"trial.ops.a\",\"credential\":\"$secret\"}" http://127.0.0.1:8080/api/v1/auth/login > /tmp/dt024-stage-b/login.json
+          jq -e '.authenticated==true and .alias=="trial.ops.a" and .trainer_only==false' /tmp/dt024-stage-b/login.json >/dev/null
+          curl -fsS -b /tmp/dt024-cookie http://127.0.0.1:8080/api/v1/ui/work-queue > /tmp/dt024-stage-b/work-queue.json
+          jq -e --arg t "$TICKET" '.view_id=="UX-RS-01" and (.data.tickets|length)==1 and .data.tickets[0].ticket_id==$t and .data.tickets[0].entity_ref=="ENTITY-DT024-A"' /tmp/dt024-stage-b/work-queue.json >/dev/null
+          curl -fsS -b /tmp/dt024-cookie http://127.0.0.1:8080/api/v1/ui/tickets/$TICKET > /tmp/dt024-stage-b/ticket.json
+          jq -e '.view_id=="UX-RS-03" and .currentness_ref=="MISSING_BINDING" and .data.acting_capacity_status=="BOUND" and .data.acting_capacity.entity_ref=="ENTITY-DT024-A" and .data.entity_material_intent_carrier_status=="WITHHELD" and .data.entity_action_withholding_reason=="ENTITY_MATERIAL_INTENT_CARRIER_NOT_BOUND" and (.data.available_actions|length)==0 and .data.close_action_available==false' /tmp/dt024-stage-b/ticket.json >/dev/null
+          curl -fsS -b /tmp/dt024-cookie http://127.0.0.1:8080/api/v1/ui/tickets/$TICKET/concerns/responsibility > /tmp/dt024-stage-b/responsibility.json
+          jq -e '.view_id=="UX-RS-06" and .data.current_responsibility.entity_ref=="ENTITY-DT024-A" and .data.current_responsibility.entity_binding_status=="BOUND" and .data.current_responsibility.assignment_ref=="51010000-0000-4000-8000-00000000000b" and .data.current_responsibility.authority_basis_ref=="AUTH-BASIS-DT024-A"' /tmp/dt024-stage-b/responsibility.json >/dev/null
+          cat > /tmp/dt024-intent.json <<JSON
+          {"intent_contract_ref":"INT-RUN-TD-05","payload":{"action_intent_id":"72000000-0000-4000-8000-000000000001","ticket_id":"$TICKET","requested_action_class":"ACTIVATE","presented_source_version_ref":"dt024:synthetic:current","expected_aggregate_version":0,"intent_time":"2026-08-28T00:00:00Z"}}
+          JSON
+          status="$(curl -sS -b /tmp/dt024-cookie -o /tmp/dt024-stage-b/intent-denied.json -w '%{http_code}' -H 'content-type: application/json' --data-binary @/tmp/dt024-intent.json http://127.0.0.1:8080/api/v1/ui/intents)"
+          test "$status" = 403
+          jq -e '.error=="ENTITY_MATERIAL_INTENT_CARRIER_NOT_BOUND"' /tmp/dt024-stage-b/intent-denied.json >/dev/null
+          test "$(tr -d '\r\n' </tmp/dt024-stage-b/dispatch-count.txt)" = 0
+          printf '%s\n' API_AUTH=PASS ACTING_CAPACITY=BOUND ENTITY=ENTITY-DT024-A CARRIER=WITHHELD INT_RUN_TD_05_HTTP_STATUS=403 INT_RUN_TD_05_ERROR=ENTITY_MATERIAL_INTENT_CARRIER_NOT_BOUND DURABLE_DISPATCH_COUNT=0 B1_EXECUTABLE_API=PASS > /tmp/dt024-stage-b/api-b1-summary.txt
+      - name: Prepare Chrome Selenium verifier
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check selenium >/dev/null
+          CHROME=''; for c in google-chrome google-chrome-stable chromium chromium-browser; do command -v "$c" >/dev/null 2>&1 && CHROME="$(command -v "$c")" && break; done
+          test -n "$CHROME"
+          "$CHROME" --version | tee /tmp/dt024-stage-b/browser-version.txt
+          echo "$CHROME" >/tmp/dt024-chrome
+      - name: Actual browser human-facing Entity and B1 proof
+        env:
+          TICKET: 71000000-0000-4000-8000-000000000001
+        run: |
+          set -euo pipefail
+          export DT024_SECRET="$(cat /tmp/dt024-secret)"
+          export DT024_CHROME="$(cat /tmp/dt024-chrome)"
+          python3 - <<'PY' | tee /tmp/dt024-stage-b/browser-summary.txt
+          import os,time
+          from selenium import webdriver
+          from selenium.webdriver.chrome.options import Options
+          from selenium.webdriver.common.by import By
+          from selenium.webdriver.support.ui import Select,WebDriverWait
+          from selenium.webdriver.support import expected_conditions as EC
+          ticket=os.environ['TICKET']; secret=os.environ['DT024_SECRET']
+          opts=Options();opts.binary_location=os.environ['DT024_CHROME'];opts.add_argument('--headless=new');opts.add_argument('--no-sandbox');opts.add_argument('--disable-gpu');opts.add_argument('--disable-dev-shm-usage');opts.add_argument('--window-size=1440,1200')
+          driver=webdriver.Chrome(options=opts);wait=WebDriverWait(driver,20)
+          try:
+            driver.get('http://127.0.0.1:8080/work')
+            wait.until(EC.presence_of_element_located((By.TAG_NAME,'select')))
+            assert 'AppTS Trial Login' in driver.page_source
+            Select(driver.find_element(By.TAG_NAME,'select')).select_by_value('trial.ops.a')
+            driver.find_element(By.CSS_SELECTOR,'input[type=password]').send_keys(secret)
+            driver.find_element(By.CSS_SELECTOR,'button[type=submit]').click()
+            wait.until(lambda d:'/work' in d.current_url and 'Role-Scoped Work Queue' in d.page_source)
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR,f'a[href="/tickets/{ticket}"]'))).click()
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR,f'section[data-ticket-id="{ticket}"]')))
+            body=driver.find_element(By.TAG_NAME,'body').text
+            assert 'Capacity status: BOUND' in body
+            assert 'Entity: ENTITY-DT024-A' in body
+            assert 'Role Instance: 51010000-0000-4000-8000-000000000009' in body
+            assert 'Assignment: 51010000-0000-4000-8000-00000000000b' in body
+            assert 'Authority basis: AUTH-BASIS-DT024-A' in body
+            assert 'Material intent carrier: WITHHELD — ENTITY_MATERIAL_INTENT_CARRIER_NOT_BOUND' in body
+            assert 'Available governed actions: None' in body
+            assert 'Entity authority restriction: ENTITY_MATERIAL_INTENT_CARRIER_NOT_BOUND' in body
+            assert len(driver.find_elements(By.CSS_SELECTOR,'[data-action-class]'))==0
+            driver.save_screenshot('/tmp/dt024-stage-b/ticket-console.png')
+            driver.get(f'http://127.0.0.1:8080/tickets/{ticket}/responsibility')
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR,'[data-entity-binding-status="BOUND"]')))
+            body=driver.find_element(By.TAG_NAME,'body').text
+            assert 'Entity boundary: ENTITY-DT024-A' in body
+            assert 'Role Instance: 51010000-0000-4000-8000-000000000009' in body
+            assert 'Assignment: 51010000-0000-4000-8000-00000000000b' in body
+            assert 'Authority basis: AUTH-BASIS-DT024-A' in body
+            assert 'Entity binding status: BOUND' in body
+            assert 'do not by themselves transfer or merge Entity-scoped Ticket responsibility' in body
+            driver.save_screenshot('/tmp/dt024-stage-b/responsibility.png')
+            print('BROWSER_LOGIN=PASS');print('BROWSER_WORK_QUEUE=PASS');print('BROWSER_TICKET_ENTITY_CAPACITY=BOUND');print('BROWSER_CARRIER=WITHHELD');print('BROWSER_MATERIAL_ACTION_CONTROLS=ABSENT');print('BROWSER_RESPONSIBILITY_ENTITY_BOUNDARY=PASS');print('B1_EXECUTABLE_BROWSER=PASS')
+          finally:
+            driver.quit()
+          PY
+      - name: Runtime B1 finalizer and non-mutation gate
+        if: always()
+        run: |
+          set -euo pipefail
+          if test -f /tmp/dt024-server.pid; then kill "$(cat /tmp/dt024-server.pid)" 2>/dev/null || true; fi
+          sleep 1
+          test "$(tr -d '\r\n' </tmp/dt024-stage-b/dispatch-count.txt)" = 0
+          grep -Fq 'B1_EXECUTABLE_API=PASS' /tmp/dt024-stage-b/api-b1-summary.txt
+          grep -Fq 'B1_EXECUTABLE_BROWSER=PASS' /tmp/dt024-stage-b/browser-summary.txt
+          git diff --exit-code
+          printf '%s\n' RUNTIME_API=PASS BROWSER_HUMAN_FACING=PASS INT_RUN_TD_05_CLASSIFICATION=B1_SAFELY_WITHHELD ACTING_CAPACITY=BOUND CARRIER=WITHHELD MATERIAL_DISPATCH=NOT_REACHED DURABLE_EFFECT=NONE PRODUCT_MUTATION=NONE TEST_SOURCE_REPAIR=NONE FACTUAL_ENTITY_MAPPING=NONE > /tmp/dt024-stage-b/FINAL.txt
+          rm -f /tmp/dt024-secret /tmp/dt024-cookie /tmp/dt024-intent.json
+      - name: Upload Stage B immutable evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dt-mcr024-arc013-stage-b-runtime-browser-evidence-${{ github.run_id }}
+          path: /tmp/dt024-stage-b
+          if-no-files-found: error
+          retention-days: 90
