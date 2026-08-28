@@ -1,0 +1,108 @@
+name: DT MCR024 ARC013 fresh migration rerun
+on:
+  push:
+    branches:
+      - experiment/dt-mcr024-arc013-readonly
+    paths:
+      - '.github/workflows/dt-mcr024-arc013-migration-rerun.yml'
+permissions:
+  contents: read
+jobs:
+  migration-rerun:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:17.11-bookworm
+        env:
+          POSTGRES_PASSWORD: dt024-superuser-local-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        working-directory: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+    steps:
+      - name: Checkout exact corrected candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 1a3660db446f97924b4127c9ab95f42aefdb1a11
+          fetch-depth: 0
+      - name: Exact identity and fresh evidence root
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 1a3660db446f97924b4127c9ab95f42aefdb1a11
+          test "$(git show -s --format=%T HEAD)" = 0893df33d6f73e0fed35a5b6d5fe9c6e39aeddc2
+          mkdir -p /tmp/dt024-migration
+          printf '%s\n' authority=MCR-to-DT-024 commit=1a3660db446f97924b4127c9ab95f42aefdb1a11 candidate_mutation=NONE correction=VERIFICATION_ENVIRONMENT_UTC_SESSION_BINDING > /tmp/dt024-migration/identity.txt
+      - name: Node toolchain
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/package-lock.json
+      - name: Install exact dependencies
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.17.0
+          npm ci
+          npm run verify:toolchain | tee /tmp/dt024-migration/toolchain.txt
+      - name: Prepare Flyway 13 and PostgreSQL 17 clients with UTC session binding
+        run: |
+          set -euo pipefail
+          if docker pull redgate/flyway:13.0.0 >/dev/null 2>&1; then
+            echo redgate/flyway:13.0.0 > /tmp/dt024-flyway-image
+          elif docker pull flyway/flyway:13.0.0 >/dev/null 2>&1; then
+            echo flyway/flyway:13.0.0 > /tmp/dt024-flyway-image
+          else
+            echo 'STOP: Flyway 13.0.0 image unavailable' >&2; exit 2
+          fi
+          sudo tee /usr/local/bin/flyway >/dev/null <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          image="$(cat /tmp/dt024-flyway-image)"
+          exec docker run --rm --network host -v "$PWD:$PWD" -v /tmp:/tmp -w "$PWD" -e FLYWAY_URL -e FLYWAY_USER -e FLYWAY_PASSWORD -e FLYWAY_LOCATIONS "$image" "$@"
+          SH
+          sudo chmod +x /usr/local/bin/flyway
+          sudo tee /usr/local/bin/psql >/dev/null <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec docker run --rm --network host -v "$PWD:$PWD" -w "$PWD" -e PGPASSWORD -e PGHOST -e PGPORT -e PGUSER -e PGDATABASE -e PGOPTIONS postgres:17.11-bookworm psql "$@"
+          SH
+          sudo chmod +x /usr/local/bin/psql
+          flyway -v | tee /tmp/dt024-migration/flyway-version.txt
+          psql --version | tee /tmp/dt024-migration/psql-version.txt
+      - name: Fresh V001-V005 migration and ARC013 verifier
+        env:
+          APPTS_B01_DISPOSABLE_DB: 'true'
+          FLYWAY_URL: jdbc:postgresql://127.0.0.1:5432/appts_b01_dt024r
+          FLYWAY_USER: postgres
+          FLYWAY_PASSWORD: dt024-superuser-local-only
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGDATABASE: appts_b01_dt024r
+          PGUSER: postgres
+          PGPASSWORD: dt024-superuser-local-only
+          PGOPTIONS: '-c timezone=UTC'
+        run: |
+          set -euo pipefail
+          pgcid="$(docker ps --filter ancestor=postgres:17.11-bookworm -q | head -n1)"
+          test -n "$pgcid"
+          docker exec "$pgcid" createdb -U postgres appts_b01_dt024r
+          psql -X -At -c "SELECT current_setting('TimeZone')" | tee /tmp/dt024-migration/session-timezone.txt
+          grep -Fxq 'UTC' /tmp/dt024-migration/session-timezone.txt
+          npm run test:migrations | tee /tmp/dt024-migration/migrations.txt
+          grep -Fq 'Successfully applied 5 migrations' /tmp/dt024-migration/migrations.txt
+          grep -Fq 'PASS: CF06-B01 bounded migration verification completed' /tmp/dt024-migration/migrations.txt
+          printf '%s\n' MIGRATIONS_V001_V005=PASS ARC013_ENTITY_VERIFIER=PASS SESSION_TIMEZONE=UTC PRODUCT_MUTATION=NONE TEST_SOURCE_REPAIR=NONE > /tmp/dt024-migration/summary.txt
+          git diff --exit-code
+      - name: Upload fresh migration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dt-mcr024-arc013-migration-evidence-${{ github.run_id }}
+          path: /tmp/dt024-migration
+          if-no-files-found: error
+          retention-days: 90
