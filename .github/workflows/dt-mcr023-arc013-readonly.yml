@@ -1,0 +1,157 @@
+name: DT MCR023 ARC013 exact read-only verification
+on:
+  push:
+    branches:
+      - experiment/dt-mcr023-arc013-readonly
+    paths:
+      - '.github/workflows/dt-mcr023-arc013-readonly.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    services:
+      postgres:
+        image: postgres:17.11-bookworm
+        env:
+          POSTGRES_PASSWORD: dt023-superuser-local-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        working-directory: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+    steps:
+      - name: Checkout exact admitted candidate
+        uses: actions/checkout@v4
+        with:
+          ref: bb00789d29c964fef1f269159b2f286ff6122ae9
+          fetch-depth: 0
+      - name: Exact commit tree and non-mutation gate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = bb00789d29c964fef1f269159b2f286ff6122ae9
+          test "$(git show -s --format=%T HEAD)" = 82800c96b6ee1a4db664ddc5b3718d6c6dd6b65d
+          test "$(git rev-list --count 685e900545c686f1c2e802ff1e712394d1d324f6..HEAD)" = 22
+          test "$(git rev-list --count HEAD..685e900545c686f1c2e802ff1e712394d1d324f6)" = 0
+          test "$(git diff --name-only 685e900545c686f1c2e802ff1e712394d1d324f6...HEAD | wc -l | tr -d ' ')" = 30
+          mkdir -p /tmp/dt023-evidence
+          printf '%s\n' authority=MCR-to-DT-023 commit=bb00789d29c964fef1f269159b2f286ff6122ae9 tree=82800c96b6ee1a4db664ddc5b3718d6c6dd6b65d predecessor=685e900545c686f1c2e802ff1e712394d1d324f6 ahead=22 behind=0 changed_files=30 candidate_mutation=NONE > /tmp/dt023-evidence/identity.txt
+      - name: Set up exact Node npm toolchain
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/package-lock.json
+      - name: Dependency install
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.17.0
+          npm ci
+          npm run verify:toolchain | tee /tmp/dt023-evidence/toolchain.txt
+          echo INSTALL=PASS >> /tmp/dt023-evidence/stages.txt
+      - name: Architecture boundaries
+        run: |
+          set -euo pipefail
+          npm run verify:boundaries | tee /tmp/dt023-evidence/boundaries.txt
+          echo BOUNDARIES=PASS >> /tmp/dt023-evidence/stages.txt
+      - name: TypeScript static typecheck
+        run: |
+          set -euo pipefail
+          npm run typecheck | tee /tmp/dt023-evidence/typecheck.txt
+          echo TYPECHECK=PASS >> /tmp/dt023-evidence/stages.txt
+      - name: Build
+        run: |
+          set -euo pipefail
+          npm run build | tee /tmp/dt023-evidence/build.txt
+          echo BUILD=PASS >> /tmp/dt023-evidence/stages.txt
+      - name: Contract tests
+        run: |
+          set -euo pipefail
+          npm run test:contracts | tee /tmp/dt023-evidence/contracts.txt
+          echo CONTRACTS=PASS >> /tmp/dt023-evidence/stages.txt
+      - name: Integration tests including MCR071 A-H
+        run: |
+          set -euo pipefail
+          npm run test:integration | tee /tmp/dt023-evidence/integration.txt
+          grep -Fq 'MCR071-A same Purpose + same Logical Domain + different Entity remains distinct' /tmp/dt023-evidence/integration.txt
+          grep -Fq 'MCR071-H human-facing acting Entity Role Assignment capacity is explicit before material commit' /tmp/dt023-evidence/integration.txt
+          echo INTEGRATION=PASS >> /tmp/dt023-evidence/stages.txt
+      - name: DG04 regression
+        run: |
+          set -euo pipefail
+          npm run test:dg04 | tee /tmp/dt023-evidence/dg04.txt
+          echo DG04=PASS >> /tmp/dt023-evidence/stages.txt
+      - name: Adverse race replay tests
+        run: |
+          set -euo pipefail
+          npm run test:adverse | tee /tmp/dt023-evidence/adverse.txt
+          echo ADVERSE=PASS >> /tmp/dt023-evidence/stages.txt
+      - name: Unit and NFR regression
+        run: |
+          set -euo pipefail
+          npm run test:unit | tee /tmp/dt023-evidence/unit.txt
+          npm run test:nfr | tee /tmp/dt023-evidence/nfr.txt
+          echo UNIT_NFR=PASS >> /tmp/dt023-evidence/stages.txt
+      - name: Prepare Flyway 13 and PostgreSQL 17 verification clients
+        run: |
+          set -euo pipefail
+          if docker pull redgate/flyway:13.0.0 >/dev/null 2>&1; then
+            echo redgate/flyway:13.0.0 > /tmp/dt023-flyway-image
+          elif docker pull flyway/flyway:13.0.0 >/dev/null 2>&1; then
+            echo flyway/flyway:13.0.0 > /tmp/dt023-flyway-image
+          else
+            echo 'STOP: Flyway 13.0.0 image unavailable' >&2; exit 2
+          fi
+          sudo tee /usr/local/bin/flyway >/dev/null <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          image="$(cat /tmp/dt023-flyway-image)"
+          exec docker run --rm --network host -v "$PWD:$PWD" -v /tmp:/tmp -w "$PWD" -e FLYWAY_URL -e FLYWAY_USER -e FLYWAY_PASSWORD -e FLYWAY_LOCATIONS "$image" "$@"
+          SH
+          sudo chmod +x /usr/local/bin/flyway
+          sudo tee /usr/local/bin/psql >/dev/null <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec docker run --rm --network host -v "$PWD:$PWD" -w "$PWD" -e PGPASSWORD -e PGHOST -e PGPORT -e PGUSER -e PGDATABASE postgres:17.11-bookworm psql "$@"
+          SH
+          sudo chmod +x /usr/local/bin/psql
+          flyway -v | tee /tmp/dt023-evidence/flyway-version.txt
+          psql --version | tee /tmp/dt023-evidence/psql-version.txt
+      - name: Flyway PostgreSQL V001-V005 and ARC013 migration verification
+        env:
+          APPTS_B01_DISPOSABLE_DB: 'true'
+          FLYWAY_URL: jdbc:postgresql://127.0.0.1:5432/appts_b01_dt023
+          FLYWAY_USER: postgres
+          FLYWAY_PASSWORD: dt023-superuser-local-only
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGDATABASE: appts_b01_dt023
+          PGUSER: postgres
+          PGPASSWORD: dt023-superuser-local-only
+        run: |
+          set -euo pipefail
+          pgcid="$(docker ps --filter ancestor=postgres:17.11-bookworm -q | head -n1)"
+          test -n "$pgcid"
+          docker exec "$pgcid" createdb -U postgres appts_b01_dt023
+          npm run test:migrations | tee /tmp/dt023-evidence/migrations.txt
+          grep -Fq 'PASS: CF06-B01 bounded migration verification completed' /tmp/dt023-evidence/migrations.txt
+          echo MIGRATIONS=PASS >> /tmp/dt023-evidence/stages.txt
+      - name: Static INT-RUN-TD-05 boundary evidence
+        run: |
+          set -euo pipefail
+          grep -Fq 'MCR071_ENTITY_MATERIAL_INTENT_CARRIER_BOUND = false' apps/api/src/projections/entity-axis-projection-port.ts
+          grep -Fq 'ENTITY_MATERIAL_INTENT_CARRIER_NOT_BOUND' apps/api/src/projections/entity-axis-projection-port.ts
+          grep -Fq 'available_actions: Object.freeze([])' apps/api/src/projections/entity-axis-projection-port.ts
+          printf '%s\n' carrier_entity_aware=NO material_intent_status=WITHHELD fail_closed_reason=ENTITY_MATERIAL_INTENT_CARRIER_NOT_BOUND preliminary_classification=B1_PENDING_RUNTIME_BROWSER > /tmp/dt023-evidence/carrier-static.txt
+      - name: Upload immutable verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dt-mcr023-arc013-static-test-migration-evidence
+          path: /tmp/dt023-evidence
+          if-no-files-found: error
+          retention-days: 90
