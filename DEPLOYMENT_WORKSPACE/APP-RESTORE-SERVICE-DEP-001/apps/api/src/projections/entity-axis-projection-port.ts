@@ -34,8 +34,11 @@ export function resolveEntityActingCapacity(row: Row): EntityActingCapacity {
   const assignmentHolder = text(row["assignment_holder_ref"]);
   const assignmentRef = text(row["assignment_ref"]);
   const assignmentBasis = text(row["assignment_authority_basis_ref"]);
-  const required = [ticketEntity, authorityEntity, holder, roleInstance, assignment, basis, responsibilityEntity, responsibilityRole, responsibilityHolder, assignmentEntity, assignmentRole, assignmentHolder, assignmentRef, assignmentBasis];
-  if (required.some((value) => value === undefined)) return Object.freeze({ status: "UNBOUND", reason_ref: "ENTITY_AUTHORITY_CONTEXT_REQUIRED" });
+  if (
+    ticketEntity === undefined || authorityEntity === undefined || holder === undefined || roleInstance === undefined || assignment === undefined || basis === undefined ||
+    responsibilityEntity === undefined || responsibilityRole === undefined || responsibilityHolder === undefined || assignmentEntity === undefined ||
+    assignmentRole === undefined || assignmentHolder === undefined || assignmentRef === undefined || assignmentBasis === undefined
+  ) return Object.freeze({ status: "UNBOUND", reason_ref: "ENTITY_AUTHORITY_CONTEXT_REQUIRED" });
   const coherent = ticketEntity === authorityEntity && ticketEntity === responsibilityEntity && ticketEntity === assignmentEntity && holder === responsibilityHolder && holder === assignmentHolder && roleInstance === responsibilityRole && roleInstance === assignmentRole && assignment === assignmentRef && basis === assignmentBasis;
   if (!coherent) return Object.freeze({ status: "MISMATCH", reason_ref: "ENTITY_AUTHORITY_CONTEXT_MISMATCH" });
   return Object.freeze({ status: "BOUND", reason_ref: "ENTITY_AUTHORITY_CONTEXT_EXPLICIT", entity_ref: ticketEntity, holder_ref: holder, role_instance_ref: roleInstance, assignment_ref: assignment, authority_basis_ref: basis });
