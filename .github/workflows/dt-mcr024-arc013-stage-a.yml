@@ -1,0 +1,165 @@
+name: DT MCR024 ARC013 fresh verification Stage A
+on:
+  push:
+    branches:
+      - experiment/dt-mcr024-arc013-readonly
+    paths:
+      - '.github/workflows/dt-mcr024-arc013-stage-a.yml'
+permissions:
+  contents: read
+jobs:
+  verify-stage-a:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    services:
+      postgres:
+        image: postgres:17.11-bookworm
+        env:
+          POSTGRES_PASSWORD: dt024-superuser-local-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        working-directory: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+    steps:
+      - name: Checkout exact corrected candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 1a3660db446f97924b4127c9ab95f42aefdb1a11
+          fetch-depth: 0
+      - name: Exact identity and non-mutation gate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 1a3660db446f97924b4127c9ab95f42aefdb1a11
+          test "$(git show -s --format=%T HEAD)" = 0893df33d6f73e0fed35a5b6d5fe9c6e39aeddc2
+          test "$(git rev-parse HEAD^)" = bb00789d29c964fef1f269159b2f286ff6122ae9
+          test "$(git rev-list --count 685e900545c686f1c2e802ff1e712394d1d324f6..HEAD)" = 23
+          test "$(git rev-list --count HEAD..685e900545c686f1c2e802ff1e712394d1d324f6)" = 0
+          test "$(git diff --name-only 685e900545c686f1c2e802ff1e712394d1d324f6...HEAD | wc -l | tr -d ' ')" = 30
+          test "$(git diff --name-only bb00789d29c964fef1f269159b2f286ff6122ae9...HEAD | wc -l | tr -d ' ')" = 1
+          test "$(git diff --name-only bb00789d29c964fef1f269159b2f286ff6122ae9...HEAD)" = 'DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/apps/api/src/projections/entity-axis-projection-port.ts'
+          mkdir -p /tmp/dt024-stage-a
+          printf '%s\n' authority=MCR-to-DT-024 commit=1a3660db446f97924b4127c9ab95f42aefdb1a11 tree=0893df33d6f73e0fed35a5b6d5fe9c6e39aeddc2 parent=bb00789d29c964fef1f269159b2f286ff6122ae9 predecessor=685e900545c686f1c2e802ff1e712394d1d324f6 ahead=23 behind=0 changed_files=30 corrected_delta_files=1 candidate_mutation=NONE > /tmp/dt024-stage-a/identity.txt
+      - name: Set up exact Node npm toolchain
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/package-lock.json
+      - name: Dependency and toolchain
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.17.0
+          npm ci
+          npm run verify:toolchain | tee /tmp/dt024-stage-a/toolchain.txt
+          echo TOOLCHAIN=PASS >> /tmp/dt024-stage-a/stages.txt
+      - name: Architecture boundaries
+        run: |
+          set -euo pipefail
+          npm run verify:boundaries | tee /tmp/dt024-stage-a/boundaries.txt
+          echo BOUNDARIES=PASS >> /tmp/dt024-stage-a/stages.txt
+      - name: Full TypeScript typecheck
+        run: |
+          set -euo pipefail
+          npm run typecheck | tee /tmp/dt024-stage-a/typecheck.txt
+          echo TYPECHECK=PASS >> /tmp/dt024-stage-a/stages.txt
+      - name: Build
+        run: |
+          set -euo pipefail
+          npm run build | tee /tmp/dt024-stage-a/build.txt
+          echo BUILD=PASS >> /tmp/dt024-stage-a/stages.txt
+      - name: Contract tests
+        run: |
+          set -euo pipefail
+          npm run test:contracts | tee /tmp/dt024-stage-a/contracts.txt
+          echo CONTRACTS=PASS >> /tmp/dt024-stage-a/stages.txt
+      - name: Integration tests including ARC013 A-H
+        run: |
+          set -euo pipefail
+          npm run test:integration | tee /tmp/dt024-stage-a/integration.txt
+          grep -Fq 'MCR071-A same Purpose + same Logical Domain + different Entity remains distinct' /tmp/dt024-stage-a/integration.txt
+          grep -Fq 'MCR071-B same Holder with multiple Entity Assignments does not bleed authority' /tmp/dt024-stage-a/integration.txt
+          grep -Fq 'MCR071-C wrong-Entity material action fails closed with no durable effect' /tmp/dt024-stage-a/integration.txt
+          grep -Fq 'MCR071-D correct Entity is necessary but not sufficient' /tmp/dt024-stage-a/integration.txt
+          grep -Fq 'MCR071-E Assignment lifecycle remains independent' /tmp/dt024-stage-a/integration.txt
+          grep -Fq 'MCR071-F audit/effect attribution includes Entity Role Instance Assignment basis' /tmp/dt024-stage-a/integration.txt
+          grep -Fq 'MCR071-G shared Incident correlation does not merge Entity governance' /tmp/dt024-stage-a/integration.txt
+          grep -Fq 'MCR071-H human-facing acting Entity Role Assignment capacity is explicit before material commit' /tmp/dt024-stage-a/integration.txt
+          echo INTEGRATION_A_H=PASS >> /tmp/dt024-stage-a/stages.txt
+      - name: DG04 regression
+        run: |
+          set -euo pipefail
+          npm run test:dg04 | tee /tmp/dt024-stage-a/dg04.txt
+          echo DG04=PASS >> /tmp/dt024-stage-a/stages.txt
+      - name: Adverse race replay checks
+        run: |
+          set -euo pipefail
+          npm run test:adverse | tee /tmp/dt024-stage-a/adverse.txt
+          echo ADVERSE=PASS >> /tmp/dt024-stage-a/stages.txt
+      - name: Unit and NFR regression
+        run: |
+          set -euo pipefail
+          npm run test:unit | tee /tmp/dt024-stage-a/unit.txt
+          npm run test:nfr | tee /tmp/dt024-stage-a/nfr.txt
+          echo UNIT_NFR=PASS >> /tmp/dt024-stage-a/stages.txt
+      - name: Prepare Flyway 13 and PostgreSQL 17 clients
+        run: |
+          set -euo pipefail
+          if docker pull redgate/flyway:13.0.0 >/dev/null 2>&1; then
+            echo redgate/flyway:13.0.0 > /tmp/dt024-flyway-image
+          elif docker pull flyway/flyway:13.0.0 >/dev/null 2>&1; then
+            echo flyway/flyway:13.0.0 > /tmp/dt024-flyway-image
+          else
+            echo 'STOP: Flyway 13.0.0 image unavailable' >&2; exit 2
+          fi
+          sudo tee /usr/local/bin/flyway >/dev/null <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          image="$(cat /tmp/dt024-flyway-image)"
+          exec docker run --rm --network host -v "$PWD:$PWD" -v /tmp:/tmp -w "$PWD" -e FLYWAY_URL -e FLYWAY_USER -e FLYWAY_PASSWORD -e FLYWAY_LOCATIONS "$image" "$@"
+          SH
+          sudo chmod +x /usr/local/bin/flyway
+          sudo tee /usr/local/bin/psql >/dev/null <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec docker run --rm --network host -v "$PWD:$PWD" -w "$PWD" -e PGPASSWORD -e PGHOST -e PGPORT -e PGUSER -e PGDATABASE postgres:17.11-bookworm psql "$@"
+          SH
+          sudo chmod +x /usr/local/bin/psql
+          flyway -v | tee /tmp/dt024-stage-a/flyway-version.txt
+          psql --version | tee /tmp/dt024-stage-a/psql-version.txt
+      - name: V001-V005 migration and ARC013 verifier
+        env:
+          APPTS_B01_DISPOSABLE_DB: 'true'
+          FLYWAY_URL: jdbc:postgresql://127.0.0.1:5432/appts_b01_dt024
+          FLYWAY_USER: postgres
+          FLYWAY_PASSWORD: dt024-superuser-local-only
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGDATABASE: appts_b01_dt024
+          PGUSER: postgres
+          PGPASSWORD: dt024-superuser-local-only
+        run: |
+          set -euo pipefail
+          pgcid="$(docker ps --filter ancestor=postgres:17.11-bookworm -q | head -n1)"
+          test -n "$pgcid"
+          docker exec "$pgcid" createdb -U postgres appts_b01_dt024
+          npm run test:migrations | tee /tmp/dt024-stage-a/migrations.txt
+          grep -Fq 'PASS: CF06-B01 bounded migration verification completed' /tmp/dt024-stage-a/migrations.txt
+          echo MIGRATIONS_V001_V005=PASS >> /tmp/dt024-stage-a/stages.txt
+      - name: Stage A fresh completion gate
+        run: |
+          set -euo pipefail
+          for x in TOOLCHAIN BOUNDARIES TYPECHECK BUILD CONTRACTS INTEGRATION_A_H DG04 ADVERSE UNIT_NFR MIGRATIONS_V001_V005; do grep -Fq "$x=PASS" /tmp/dt024-stage-a/stages.txt; done
+          git diff --exit-code
+          printf '%s\n' STAGE_A=PASS PRODUCT_MUTATION=NONE TEST_SOURCE_REPAIR=NONE > /tmp/dt024-stage-a/summary.txt
+      - name: Upload Stage A immutable evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dt-mcr024-arc013-stage-a-evidence-${{ github.run_id }}
+          path: /tmp/dt024-stage-a
+          if-no-files-found: error
+          retention-days: 90
