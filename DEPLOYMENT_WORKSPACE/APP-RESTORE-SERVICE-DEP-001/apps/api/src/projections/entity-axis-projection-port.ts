@@ -4,6 +4,7 @@ import type { UiProjectionPort, UiReadContext } from "../routes/ui-read.ts";
 type Row = Readonly<Record<string, unknown>>;
 type Envelope = Readonly<Record<string, unknown>> & { readonly data?: unknown };
 
+export const MCR071_ENTITY_MATERIAL_INTENT_CARRIER_BOUND = false as const;
 export type EntityActingCapacityStatus = "BOUND" | "UNBOUND" | "MISMATCH";
 export interface EntityActingCapacity {
   readonly status: EntityActingCapacityStatus;
@@ -59,17 +60,20 @@ async function augmentTicketConsole(pool: PersistencePool, value: unknown, ticke
   const data = record(envelope.data);
   const row = await capacityRow(pool, ticketId);
   const capacity = resolveEntityActingCapacity(row);
-  const actionBound = capacity.status === "BOUND";
+  const capacityBound = capacity.status === "BOUND";
+  const materialIntentReady = capacityBound && MCR071_ENTITY_MATERIAL_INTENT_CARRIER_BOUND;
+  const withholdingReason = !capacityBound ? capacity.reason_ref : "ENTITY_MATERIAL_INTENT_CARRIER_NOT_BOUND";
   return Object.freeze({
     ...envelope,
-    currentness_ref: actionBound ? envelope["currentness_ref"] : "MISSING_BINDING",
+    currentness_ref: materialIntentReady ? envelope["currentness_ref"] : "MISSING_BINDING",
     data: Object.freeze({
       ...data,
       ticket_entity_ref: text(row["ticket_entity_ref"]) ?? null,
       acting_capacity_status: capacity.status,
       acting_capacity: capacity,
-      entity_action_withholding_reason: actionBound ? null : capacity.reason_ref,
-      ...(actionBound ? {} : { available_actions: Object.freeze([]), action_controls: Object.freeze([]), close_action_available: false }),
+      entity_material_intent_carrier_status: MCR071_ENTITY_MATERIAL_INTENT_CARRIER_BOUND ? "BOUND" : "WITHHELD",
+      entity_action_withholding_reason: materialIntentReady ? null : withholdingReason,
+      ...(materialIntentReady ? {} : { available_actions: Object.freeze([]), action_controls: Object.freeze([]), close_action_available: false }),
     }),
   });
 }
