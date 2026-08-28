@@ -6,8 +6,8 @@ export const I03_PROFILE_IDENTITY = "APPTS.CORE.I03.PROFILE.1.0.0" as const;
 
 export interface GatePredicateResult { readonly predicate_identity: string; readonly result_code: string; readonly reason_ref?: ContractReference; readonly input_record_ref?: ContractReference; }
 export interface EvidenceGateResultPayload {
-  readonly gate_result_id: ContractId; readonly ticket_id: ContractId; readonly entity_ref: ContractReference; readonly gate_identity: string; readonly gate_evaluation_id: ContractId;
-  readonly actor_holder_ref: ContractReference; readonly acting_role_instance_ref: ContractReference; readonly acting_assignment_ref: ContractReference; readonly authority_basis_ref: ContractReference;
+  readonly gate_result_id: ContractId; readonly ticket_id: ContractId; readonly entity_ref?: ContractReference; readonly gate_identity: string; readonly gate_evaluation_id: ContractId;
+  readonly actor_holder_ref?: ContractReference; readonly acting_role_instance_ref?: ContractReference; readonly acting_assignment_ref?: ContractReference; readonly authority_basis_ref?: ContractReference;
   readonly input_version_set_ref: ContractReference | Readonly<Record<string, unknown>>; readonly evidence_set_version_id?: ContractId;
   readonly verification_result_ref?: ContractReference; readonly communication_status_ref?: ContractReference; readonly blocker_dependency_status_ref?: ContractReference;
   readonly policy_binding_ref?: ContractReference; readonly contradiction_status_ref?: ContractReference; readonly evidence_sufficiency_ref?: ContractReference;

@@ -6,8 +6,8 @@ export const I02_PROFILE_IDENTITY = "APPTS.CORE.I02.PROFILE.1.0.0" as const;
 
 export interface AuthorityAction { readonly action_class_ref: string; readonly permission_code: string; readonly restriction_reason_ref?: ContractReference; }
 export interface AuthorityResolutionPayload {
-  readonly authority_result_id: ContractId; readonly ticket_id: ContractId; readonly entity_ref: ContractReference; readonly domain_id: ContractId;
-  readonly actor_holder_ref: ContractReference; readonly acting_role_instance_ref: ContractReference; readonly acting_assignment_ref: ContractReference; readonly authority_basis_ref: ContractReference;
+  readonly authority_result_id: ContractId; readonly ticket_id: ContractId; readonly entity_ref?: ContractReference; readonly domain_id: ContractId;
+  readonly actor_holder_ref?: ContractReference; readonly acting_role_instance_ref?: ContractReference; readonly acting_assignment_ref?: ContractReference; readonly authority_basis_ref?: ContractReference;
   readonly context_ref: ContractReference | Readonly<Record<string, unknown>>;
   readonly assignment_snapshot_refs: readonly ContractReference[];
   readonly responsibility_id?: ContractId; readonly responsible_assignment_ref?: ContractReference;

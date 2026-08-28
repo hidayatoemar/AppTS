@@ -1,7 +1,7 @@
 import type { TicketActivationMessage, ValidationResult } from "@appts-restore-service/contracts";
 
 export type LifecycleState = "ACCEPTED" | "ACTIVE" | "TERMINAL_PROCESSING" | "CLOSED";
-export interface RuntimeAggregate { readonly ticketId: string; readonly entityRef: string; readonly state: LifecycleState; readonly aggregateVersion: number; readonly purposeBindingId: string; readonly purposeIdentity: string; readonly purposeVersion: string; readonly packageIdentity: string; readonly packageVersion: string; readonly activationId: string; }
+export interface RuntimeAggregate { readonly ticketId: string; readonly entityRef?: string; readonly state: LifecycleState; readonly aggregateVersion: number; readonly purposeBindingId: string; readonly purposeIdentity: string; readonly purposeVersion: string; readonly packageIdentity: string; readonly packageVersion: string; readonly activationId: string; }
 export type ActivationResult = { readonly status: "ACTIVATED"; readonly aggregate: RuntimeAggregate } | { readonly status: "REPLAY"; readonly aggregate: RuntimeAggregate } | { readonly status: "HELD_CONFLICT" | "NO_EFFECT"; readonly reason: string };
 
 export function activateRuntime(existing: RuntimeAggregate | undefined, message: TicketActivationMessage, validation: ValidationResult): ActivationResult {

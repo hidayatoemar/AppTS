@@ -2,7 +2,7 @@ import type { TicketActivationPayload } from "@appts-restore-service/contracts";
 import type { AdmissionAssessment } from "./admission.ts";
 import type { PurposeBinding } from "./purpose-binding.ts";
 export interface TicketFormationRecord { readonly formationId: string; readonly ticketId: string; readonly admissionAssessmentId: string; readonly activation: TicketActivationPayload; }
-export interface FormationInput { readonly formationId: string; readonly ticketId: string; readonly entityRef: string; readonly domainId: string; readonly intakeDecisionId: string; readonly responsibleAssignmentRef: string; readonly formationEvidenceSetRef: string; readonly aggregateVersion: number; readonly effectiveAt: string; readonly binding: PurposeBinding; }
+export interface FormationInput { readonly formationId: string; readonly ticketId: string; readonly entityRef?: string; readonly domainId: string; readonly intakeDecisionId: string; readonly responsibleAssignmentRef: string; readonly formationEvidenceSetRef: string; readonly aggregateVersion: number; readonly effectiveAt: string; readonly binding: PurposeBinding; }
 export function formTicket(assessment: AdmissionAssessment, input: FormationInput): TicketFormationRecord {
   if (assessment.result !== "ACCEPTABLE") throw new Error("ADMISSION_NOT_ACCEPTABLE");
   if (!input.entityRef || !input.responsibleAssignmentRef || !input.formationEvidenceSetRef) throw new Error("FORMATION_PREREQUISITE_MISSING");
