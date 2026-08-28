@@ -125,6 +125,7 @@ const verificationFiles = [
   "db/verify/001_cf01_constraints.sql",
   "db/verify/002_cf01_history_inbox_outbox.sql",
   "db/verify/003_dg04_diagnostics.sql",
+  "db/verify/004_arc013_entity_axis.sql",
   "db/fixtures/cf01_negative.sql",
 ];
 
