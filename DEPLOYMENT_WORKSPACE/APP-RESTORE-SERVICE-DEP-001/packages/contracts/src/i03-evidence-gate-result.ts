@@ -6,7 +6,8 @@ export const I03_PROFILE_IDENTITY = "APPTS.CORE.I03.PROFILE.1.0.0" as const;
 
 export interface GatePredicateResult { readonly predicate_identity: string; readonly result_code: string; readonly reason_ref?: ContractReference; readonly input_record_ref?: ContractReference; }
 export interface EvidenceGateResultPayload {
-  readonly gate_result_id: ContractId; readonly ticket_id: ContractId; readonly gate_identity: string; readonly gate_evaluation_id: ContractId;
+  readonly gate_result_id: ContractId; readonly ticket_id: ContractId; readonly entity_ref: ContractReference; readonly gate_identity: string; readonly gate_evaluation_id: ContractId;
+  readonly actor_holder_ref: ContractReference; readonly acting_role_instance_ref: ContractReference; readonly acting_assignment_ref: ContractReference; readonly authority_basis_ref: ContractReference;
   readonly input_version_set_ref: ContractReference | Readonly<Record<string, unknown>>; readonly evidence_set_version_id?: ContractId;
   readonly verification_result_ref?: ContractReference; readonly communication_status_ref?: ContractReference; readonly blocker_dependency_status_ref?: ContractReference;
   readonly policy_binding_ref?: ContractReference; readonly contradiction_status_ref?: ContractReference; readonly evidence_sufficiency_ref?: ContractReference;
@@ -16,14 +17,14 @@ export interface EvidenceGateResultPayload {
   readonly effective_to?: ContractTime; readonly predecessor_gate_result_ref?: ContractReference; readonly supersedes_gate_result_ref?: ContractReference;
 }
 export type EvidenceGateResultMessage = ContractEnvelope<EvidenceGateResultPayload>;
-const KEYS = new Set(["gate_result_id", "ticket_id", "gate_identity", "gate_evaluation_id", "input_version_set_ref", "evidence_set_version_id", "verification_result_ref", "communication_status_ref", "blocker_dependency_status_ref", "policy_binding_ref", "contradiction_status_ref", "evidence_sufficiency_ref", "gate_predicate_results", "progression_envelope_id", "permitted_progression_classes", "terminal_disposition_eligibility_ref", "closure_eligibility_ref", "currentness_ref", "effective_from", "effective_to", "predecessor_gate_result_ref", "supersedes_gate_result_ref"]);
+const KEYS = new Set(["gate_result_id", "ticket_id", "entity_ref", "gate_identity", "gate_evaluation_id", "actor_holder_ref", "acting_role_instance_ref", "acting_assignment_ref", "authority_basis_ref", "input_version_set_ref", "evidence_set_version_id", "verification_result_ref", "communication_status_ref", "blocker_dependency_status_ref", "policy_binding_ref", "contradiction_status_ref", "evidence_sufficiency_ref", "gate_predicate_results", "progression_envelope_id", "permitted_progression_classes", "terminal_disposition_eligibility_ref", "closure_eligibility_ref", "currentness_ref", "effective_from", "effective_to", "predecessor_gate_result_ref", "supersedes_gate_result_ref"]);
 const PREDICATE_KEYS = new Set(["predicate_identity", "result_code", "reason_ref", "input_record_ref"]);
 
 function validatePayload(payload: unknown): readonly ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   if (!isRecord(payload)) return [issue("payload", "REQUIRED_STRUCT")];
   assertExactKeys(payload, KEYS, issues, "payload.");
-  for (const key of ["gate_result_id", "ticket_id", "gate_identity", "gate_evaluation_id", "currentness_ref"]) requireNonEmptyString(payload, key, issues, "payload.");
+  for (const key of ["gate_result_id", "ticket_id", "entity_ref", "gate_identity", "gate_evaluation_id", "actor_holder_ref", "acting_role_instance_ref", "acting_assignment_ref", "authority_basis_ref", "currentness_ref"]) requireNonEmptyString(payload, key, issues, "payload.");
   if (!(typeof payload.input_version_set_ref === "string" && payload.input_version_set_ref.length > 0) && !isRecord(payload.input_version_set_ref)) issues.push(issue("payload.input_version_set_ref", "REQUIRED_REF_OR_STRUCT"));
   const predicates = requireArray(payload, "gate_predicate_results", issues, "payload.");
   predicates?.forEach((value, index) => {

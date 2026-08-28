@@ -8,6 +8,7 @@ export const I01_ACTIVATION_CODE = "ACTIVATE" as const;
 export interface TicketActivationPayload {
   readonly activation_id: ContractId;
   readonly ticket_id: ContractId;
+  readonly entity_ref: ContractReference;
   readonly purpose_binding_id: ContractId;
   readonly purpose_identity: string;
   readonly purpose_version: string;
@@ -25,13 +26,13 @@ export interface TicketActivationPayload {
 }
 
 export type TicketActivationMessage = ContractEnvelope<TicketActivationPayload>;
-const KEYS = new Set(["activation_id", "ticket_id", "purpose_binding_id", "purpose_identity", "purpose_version", "package_identity", "package_version", "domain_id", "intake_decision_id", "responsible_assignment_ref", "formation_evidence_set_ref", "producer_aggregate_version", "effective_at", "activation_code", "predecessor_activation_ref", "supersedes_activation_ref"]);
+const KEYS = new Set(["activation_id", "ticket_id", "entity_ref", "purpose_binding_id", "purpose_identity", "purpose_version", "package_identity", "package_version", "domain_id", "intake_decision_id", "responsible_assignment_ref", "formation_evidence_set_ref", "producer_aggregate_version", "effective_at", "activation_code", "predecessor_activation_ref", "supersedes_activation_ref"]);
 
 function validatePayload(payload: unknown): readonly ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   if (!isRecord(payload)) return [issue("payload", "REQUIRED_STRUCT")];
   assertExactKeys(payload, KEYS, issues, "payload.");
-  for (const key of ["activation_id", "ticket_id", "purpose_binding_id", "purpose_identity", "purpose_version", "package_identity", "package_version", "domain_id", "intake_decision_id", "responsible_assignment_ref", "formation_evidence_set_ref", "activation_code"]) requireNonEmptyString(payload, key, issues, "payload.");
+  for (const key of ["activation_id", "ticket_id", "entity_ref", "purpose_binding_id", "purpose_identity", "purpose_version", "package_identity", "package_version", "domain_id", "intake_decision_id", "responsible_assignment_ref", "formation_evidence_set_ref", "activation_code"]) requireNonEmptyString(payload, key, issues, "payload.");
   requireNonNegativeInteger(payload, "producer_aggregate_version", issues, "payload.");
   requireTimestamp(payload, "effective_at", issues, "payload.");
   optionalNonEmptyString(payload, "predecessor_activation_ref", issues, "payload.");
