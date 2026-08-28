@@ -8,6 +8,7 @@ import { apiConfigFromEnv, type ApiConfig, type Env } from "@appts-restore-servi
 import { createLogger, type Logger } from "@appts-restore-service/observability";
 import { composeApi, type ApiComposition } from "./composition.ts";
 import { createCf06PreTrialProjectionPort } from "./projections/cf06-pretrial-projection-port.ts";
+import { createEntityAxisProjectionPort } from "./projections/entity-axis-projection-port.ts";
 import { registerTlsDay3AuthRoutes } from "./routes/trial-auth-http.ts";
 import { registerTlsDay3EndShiftRoute } from "./routes/trial-end-shift-http.ts";
 import { registerTlsDay3TrainerRoutes } from "./routes/trial-trainer-http.ts";
@@ -63,7 +64,8 @@ export async function createDepBootstrapServer(options: DepBootstrapOptions = {}
   const day2Intents = pool === undefined ? undefined : createTlsDay2Arc001Dispatcher(pool, day1Intents!);
   const day3Intents = pool === undefined ? undefined : createTlsDay3Arc002Dispatcher(pool, day2Intents!);
   const trainerIntents = pool === undefined ? undefined : createTlsDay3TrainerReseedDispatcher(day3Intents!);
-  const composition = options.composition ?? composeApi({ projections: createCf06PreTrialProjectionPort(pool!), intents: trainerIntents!, diagnostics: Object.freeze({ async retrieve(): Promise<never> { throw new Error("DIAGNOSTIC_AUTHORITY_BINDING_REQUIRED"); } }) });
+  const baseProjections = pool === undefined ? undefined : createCf06PreTrialProjectionPort(pool);
+  const composition = options.composition ?? composeApi({ projections: createEntityAxisProjectionPort(pool!, baseProjections!), intents: trainerIntents!, diagnostics: Object.freeze({ async retrieve(): Promise<never> { throw new Error("DIAGNOSTIC_AUTHORITY_BINDING_REQUIRED"); } }) });
   if(pool!==undefined&&options.composition===undefined)await prepareExistingTlsDay3Closures(pool);
   const app = fastify({ logger: false });
   await app.register(fastifyStatic, { root: staticRoot, serve: false, wildcard: false, index: false, redirect: false });
