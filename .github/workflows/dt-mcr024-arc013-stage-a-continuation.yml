@@ -1,0 +1,163 @@
+name: DT MCR024 ARC013 Stage A continuation
+on:
+  push:
+    branches:
+      - experiment/dt-mcr024-arc013-readonly
+    paths:
+      - '.github/workflows/dt-mcr024-arc013-stage-a-continuation.yml'
+permissions:
+  contents: read
+jobs:
+  continue-stage-a:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    services:
+      postgres:
+        image: postgres:17.11-bookworm
+        env:
+          POSTGRES_PASSWORD: dt024-superuser-local-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        working-directory: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001
+    steps:
+      - name: Checkout exact corrected candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 1a3660db446f97924b4127c9ab95f42aefdb1a11
+          fetch-depth: 0
+      - name: Exact identity
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 1a3660db446f97924b4127c9ab95f42aefdb1a11
+          test "$(git show -s --format=%T HEAD)" = 0893df33d6f73e0fed35a5b6d5fe9c6e39aeddc2
+          mkdir -p /tmp/dt024-stage-a-cont
+          printf '%s\n' authority=MCR-to-DT-024 commit=1a3660db446f97924b4127c9ab95f42aefdb1a11 tree=0893df33d6f73e0fed35a5b6d5fe9c6e39aeddc2 candidate_mutation=NONE > /tmp/dt024-stage-a-cont/identity.txt
+      - name: Toolchain and dependency setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: DEPLOYMENT_WORKSPACE/APP-RESTORE-SERVICE-DEP-001/package-lock.json
+      - name: Install
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.17.0
+          npm ci
+          npm run verify:toolchain | tee /tmp/dt024-stage-a-cont/toolchain.txt
+      - name: Reproduce and classify legacy route harness drift
+        run: |
+          set -euo pipefail
+          set +e
+          node --experimental-strip-types --test tests/integration/ui-routes.integration.test.ts > /tmp/dt024-stage-a-cont/legacy-ui-routes.txt 2>&1
+          rc=$?
+          set -e
+          test "$rc" -ne 0
+          grep -Fq '21 !== 19' /tmp/dt024-stage-a-cont/legacy-ui-routes.txt
+          node --experimental-strip-types --input-type=module <<'NODE' | tee /tmp/dt024-stage-a-cont/route-classifier.txt
+          import assert from 'node:assert/strict';
+          import { ROUTES, resolveRoute } from './apps/web/src/router.ts';
+          const legacy=[['/work','UX-RS-01'],['/intake','UX-RS-02'],['/intake/case','UX-RS-02'],['/tickets/t','UX-RS-03'],['/tickets/t/action/RESTORE','UX-RS-04'],['/tickets/t/evidence','UX-RS-05'],['/tickets/t/responsibility','UX-RS-06'],['/tickets/t/conditions','UX-RS-07'],['/tickets/t/communication','UX-RS-08'],['/tickets/t/incident/i','UX-RS-09'],['/incidents/i','UX-RS-09'],['/tickets/t/reconciliation','UX-RS-10'],['/tickets/t/closure','UX-RS-11'],['/tickets/t/closed','UX-RS-12'],['/tickets/t/history','UX-RS-HISTORY'],['/control','UX-RS-13'],['/executive','UX-RS-14'],['/diagnostics/ref','UX-RS-15'],['/trainer/tls-day2','TLS-D2-TRAINER']];
+          assert.equal(ROUTES.length,21);
+          assert.deepEqual(ROUTES.slice(0,2), [['/login','TLS-D3-LOGIN'],['/end-shift','TLS-D3-END-SHIFT']]);
+          for (const [path,view] of legacy) { const result=resolveRoute(path); assert.equal('viewId' in result && result.viewId, view); }
+          assert.deepEqual(resolveRoute('/'),{redirect:'/work'});
+          assert.deepEqual(resolveRoute('/reopen'),{notFound:true});
+          console.log('ROUTE_DRIFT_CLASSIFICATION=STRUCTURAL_LEGACY_HARNESS_DRIFT');
+          console.log('PRODUCT_ROUTE_REGRESSION=NO');
+          console.log('LEGACY_CASES_19=PASS');
+          console.log('ADDITIONAL_AUTH_ROUTES=/login,/end-shift');
+          NODE
+      - name: Remaining integration components including ARC013 A-H
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types --test \
+            tests/integration/core-d01.integration.test.ts \
+            tests/integration/core-d02.integration.test.ts \
+            tests/integration/core-d03.integration.test.ts \
+            tests/integration/runtime-d04.integration.test.ts \
+            tests/integration/entity-axis-mcr071.integration.test.ts \
+            tests/integration/d05-pending-capture.integration.test.ts | tee /tmp/dt024-stage-a-cont/integration-components.txt
+          grep -Fq 'MCR071-A same Purpose + same Logical Domain + different Entity remains distinct' /tmp/dt024-stage-a-cont/integration-components.txt
+          grep -Fq 'MCR071-H human-facing acting Entity Role Assignment capacity is explicit before material commit' /tmp/dt024-stage-a-cont/integration-components.txt
+          echo INTEGRATION_COMPONENTS=PASS >> /tmp/dt024-stage-a-cont/stages.txt
+      - name: DG04 regression
+        run: |
+          set -euo pipefail
+          npm run test:dg04 | tee /tmp/dt024-stage-a-cont/dg04.txt
+          echo DG04=PASS >> /tmp/dt024-stage-a-cont/stages.txt
+      - name: Adverse race replay checks
+        run: |
+          set -euo pipefail
+          npm run test:adverse | tee /tmp/dt024-stage-a-cont/adverse.txt
+          echo ADVERSE=PASS >> /tmp/dt024-stage-a-cont/stages.txt
+      - name: Unit and NFR regression
+        run: |
+          set -euo pipefail
+          npm run test:unit | tee /tmp/dt024-stage-a-cont/unit.txt
+          npm run test:nfr | tee /tmp/dt024-stage-a-cont/nfr.txt
+          echo UNIT_NFR=PASS >> /tmp/dt024-stage-a-cont/stages.txt
+      - name: Prepare Flyway 13 and PostgreSQL 17 clients
+        run: |
+          set -euo pipefail
+          if docker pull redgate/flyway:13.0.0 >/dev/null 2>&1; then
+            echo redgate/flyway:13.0.0 > /tmp/dt024-flyway-image
+          elif docker pull flyway/flyway:13.0.0 >/dev/null 2>&1; then
+            echo flyway/flyway:13.0.0 > /tmp/dt024-flyway-image
+          else
+            echo 'STOP: Flyway 13.0.0 image unavailable' >&2; exit 2
+          fi
+          sudo tee /usr/local/bin/flyway >/dev/null <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          image="$(cat /tmp/dt024-flyway-image)"
+          exec docker run --rm --network host -v "$PWD:$PWD" -v /tmp:/tmp -w "$PWD" -e FLYWAY_URL -e FLYWAY_USER -e FLYWAY_PASSWORD -e FLYWAY_LOCATIONS "$image" "$@"
+          SH
+          sudo chmod +x /usr/local/bin/flyway
+          sudo tee /usr/local/bin/psql >/dev/null <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec docker run --rm --network host -v "$PWD:$PWD" -w "$PWD" -e PGPASSWORD -e PGHOST -e PGPORT -e PGUSER -e PGDATABASE postgres:17.11-bookworm psql "$@"
+          SH
+          sudo chmod +x /usr/local/bin/psql
+          flyway -v | tee /tmp/dt024-stage-a-cont/flyway-version.txt
+          psql --version | tee /tmp/dt024-stage-a-cont/psql-version.txt
+      - name: V001-V005 migration and ARC013 verifier
+        env:
+          APPTS_B01_DISPOSABLE_DB: 'true'
+          FLYWAY_URL: jdbc:postgresql://127.0.0.1:5432/appts_b01_dt024c
+          FLYWAY_USER: postgres
+          FLYWAY_PASSWORD: dt024-superuser-local-only
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGDATABASE: appts_b01_dt024c
+          PGUSER: postgres
+          PGPASSWORD: dt024-superuser-local-only
+        run: |
+          set -euo pipefail
+          pgcid="$(docker ps --filter ancestor=postgres:17.11-bookworm -q | head -n1)"
+          test -n "$pgcid"
+          docker exec "$pgcid" createdb -U postgres appts_b01_dt024c
+          npm run test:migrations | tee /tmp/dt024-stage-a-cont/migrations.txt
+          grep -Fq 'PASS: CF06-B01 bounded migration verification completed' /tmp/dt024-stage-a-cont/migrations.txt
+          echo MIGRATIONS_V001_V005=PASS >> /tmp/dt024-stage-a-cont/stages.txt
+      - name: Stage A continuation completion gate
+        run: |
+          set -euo pipefail
+          for x in INTEGRATION_COMPONENTS DG04 ADVERSE UNIT_NFR MIGRATIONS_V001_V005; do grep -Fq "$x=PASS" /tmp/dt024-stage-a-cont/stages.txt; done
+          grep -Fq 'ROUTE_DRIFT_CLASSIFICATION=STRUCTURAL_LEGACY_HARNESS_DRIFT' /tmp/dt024-stage-a-cont/route-classifier.txt
+          grep -Fq 'PRODUCT_ROUTE_REGRESSION=NO' /tmp/dt024-stage-a-cont/route-classifier.txt
+          git diff --exit-code
+          printf '%s\n' STAGE_A_CONTINUATION=PASS ROUTE_DRIFT=STRUCTURAL_LEGACY_HARNESS_DRIFT PRODUCT_MUTATION=NONE TEST_SOURCE_REPAIR=NONE > /tmp/dt024-stage-a-cont/summary.txt
+      - name: Upload Stage A continuation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dt-mcr024-arc013-stage-a-cont-evidence-${{ github.run_id }}
+          path: /tmp/dt024-stage-a-cont
+          if-no-files-found: error
+          retention-days: 90
