@@ -3,7 +3,7 @@ import test from "node:test";
 import { executeLifecycleEffect, mayRetryAfterReconciliation, reconcileUncertainEffect, type CommitOutcome, type DurableEffectResult, type RuntimeAggregate, type RuntimeEffectStore } from "../../packages/runtime-d04/src/index.ts";
 
 class AdverseStore implements RuntimeEffectStore {
-  aggregate: RuntimeAggregate = { ticketId: "t", state: "ACCEPTED", aggregateVersion: 0, purposeBindingId: "pb", purposeIdentity: "restore", purposeVersion: "1", packageIdentity: "pkg", packageVersion: "1", activationId: "a" };
+  aggregate: RuntimeAggregate = { ticketId: "t", entityRef: "ENTITY-A", state: "ACCEPTED", aggregateVersion: 0, purposeBindingId: "pb", purposeIdentity: "restore", purposeVersion: "1", packageIdentity: "pkg", packageVersion: "1", activationId: "a" };
   results = new Map<string, DurableEffectResult>();
   readonly uncertain: boolean;
   constructor(uncertain = false) { this.uncertain = uncertain; }
@@ -11,7 +11,7 @@ class AdverseStore implements RuntimeEffectStore {
   async findCommandResult(id: string) { return this.results.get(id); }
   async commitEffect(expected: number, next: RuntimeAggregate, result: DurableEffectResult): Promise<CommitOutcome> { if (this.uncertain) return { status: "UNCERTAIN", reconciliationRef: `reconcile:${result.commandId}` }; if (this.aggregate.aggregateVersion !== expected) return { status: "VERSION_CONFLICT" }; this.aggregate = next; this.results.set(result.commandId, result); return { status: "COMMITTED", result }; }
 }
-const command = (id: string, hash = "h") => ({ commandId: id, payloadHash: hash, ticketId: "t", expectedAggregateVersion: 0, actionClass: "ACTIVATE", targetState: "ACTIVE" as const, availableActions: ["ACTIVATE"], currentness: "CURRENT" as const });
+const command = (id: string, hash = "h") => ({ commandId: id, payloadHash: hash, ticketId: "t", entityRef: "ENTITY-A", actorHolderRef: "HOLDER-H", actingRoleInstanceRef: "ROLE-INSTANCE-A", actingAssignmentRef: "ASSIGNMENT-A", authorityBasisRef: "AUTH-BASIS-A", expectedAggregateVersion: 0, actionClass: "ACTIVATE", targetState: "ACTIVE" as const, availableActions: ["ACTIVATE"], currentness: "CURRENT" as const });
 
 test("duplicate replay is idempotent and conflicting replay is held", async () => {
   const store = new AdverseStore();
