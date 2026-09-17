@@ -1,5 +1,6 @@
 import type { ActionEffectPort } from "../adapters/action-effect-port.js";
 import type { ActionCommandEnvelope, EvidenceProvenanceRef, ScopeRef } from "../contracts/ce-di.js";
+import type { ResponsibilityHandoverRecord } from "../contracts/b6.js";
 import type { ExternalExecutionObservation, ExternalReconciliationEvidence } from "../contracts/b8.js";
 import type { PolicyConfig } from "../contracts/policy.js";
 import { firstSlicePolicy } from "../config/policy-config.js";
@@ -7,6 +8,7 @@ import { InMemoryStore } from "../persistence/in-memory-store.js";
 import type { AppendBatch } from "../persistence/ports.js";
 import type { CommandPipelineResult } from "../runtime/command-pipeline.js";
 import { executeCommand } from "../runtime/command-pipeline.js";
+import { evaluateResponsibilityHandover } from "../runtime/responsibility-handover-controller.js";
 import type { AuthoritativeP01ToP10Record, ScopeSnapshot } from "../runtime/runtime-composition.js";
 import { scopeKey } from "../runtime/runtime-composition.js";
 import { ManualClock } from "./clock.js";
@@ -45,12 +47,19 @@ export interface HumanClarificationStimulus {
   evidence: EvidenceProvenanceRef[];
 }
 
+export interface ResponsibilityHandoverStimulus {
+  kind: "RESPONSIBILITY_HANDOVER";
+  scopeRef: ScopeRef;
+  handover: ResponsibilityHandoverRecord;
+}
+
 export type Stimulus =
   | EventOrObservationStimulus
   | ActionCommandStimulus
   | TimeoutStimulus
   | ExternalResponseStimulus
-  | HumanClarificationStimulus;
+  | HumanClarificationStimulus
+  | ResponsibilityHandoverStimulus;
 
 export interface ScenarioStepResult {
   stimulusKind: Stimulus["kind"];
@@ -61,6 +70,7 @@ export interface ScenarioStepResult {
 export interface ScenarioResult {
   steps: ScenarioStepResult[];
   snapshots: ScopeSnapshot[];
+  gateEnableActionProjection?: unknown;
 }
 
 export class ScenarioHarness {
@@ -90,7 +100,12 @@ export class ScenarioHarness {
     const stimuli = Array.isArray(input) ? input : [input];
     const steps: ScenarioStepResult[] = [];
     for (const stimulus of stimuli) steps.push(await this.applyStimulus(stimulus));
-    return { steps, snapshots: await this.currentSnapshots() };
+    const gateEnableActionProjection = lastGateEnableActionProjection(steps);
+    return {
+      steps,
+      snapshots: await this.currentSnapshots(),
+      ...(gateEnableActionProjection === undefined ? {} : { gateEnableActionProjection }),
+    };
   }
 
   async replay(scopeRef: ScopeRef): Promise<ScenarioResult> {
@@ -114,6 +129,7 @@ export class ScenarioHarness {
       truthOrEffectRefs: unique(truthOrEffectRefs),
       dependencyOrObligationRefs: unique(dependencyOrObligationRefs),
       evidenceRefs: unique(evidenceRefs),
+      gateEnableActionProjection: result.gateEnableActionProjection,
     });
   }
 
@@ -130,6 +146,8 @@ export class ScenarioHarness {
         return { stimulusKind: stimulus.kind, scopeRef: stimulus.scopeRef, result: { advancedMs: stimulus.advanceMs, now: this.clock.now() } };
       case "EXTERNAL_RESPONSE":
         return { stimulusKind: stimulus.kind, scopeRef: stimulus.scopeRef, result: await this.appendExternalResponse(stimulus) };
+      case "RESPONSIBILITY_HANDOVER":
+        return { stimulusKind: stimulus.kind, scopeRef: stimulus.scopeRef, result: await this.applyResponsibilityHandover(stimulus) };
     }
   }
 
@@ -157,6 +175,21 @@ export class ScenarioHarness {
     const batch = emptyBatch(this.ids.next("sim-external"), stimulus.scopeRef, []);
     batch.otherAuthoritativeP01ToP10Records = records;
     return this.store.append(snapshot.version, batch);
+  }
+
+  private async applyResponsibilityHandover(stimulus: ResponsibilityHandoverStimulus) {
+    if (scopeKey(stimulus.scopeRef) !== scopeKey(stimulus.handover.scopeRef)) throw new Error("HANDOVER_STIMULUS_SCOPE_MISMATCH");
+    const snapshot = await this.store.load(stimulus.scopeRef);
+    const evaluation = evaluateResponsibilityHandover(snapshot.responsibility, stimulus.handover);
+    const emittedObligationRefs =
+      evaluation.kind === "RESPONSIBILITY_UNCHANGED" && evaluation.interventionObligation
+        ? [this.ids.next("handover-intervention-obligation")]
+        : [];
+    const batch = emptyBatch(this.ids.next("sim-handover"), stimulus.scopeRef, []);
+    batch.responsibilityHandoverEffects = [stimulus.handover];
+    batch.residualObligationRefs = emittedObligationRefs;
+    const commit = await this.store.append(snapshot.version, batch);
+    return { evaluation, emittedObligationRefs, newVersion: commit.newVersion };
   }
 
   private seedScope(snapshot: ScopeSnapshot): void {
@@ -202,6 +235,14 @@ function emptyBatch(commitId: string, scopeRef: ScopeRef, evidenceProvenance: Ev
     verificationClosureEffects: [],
     otherAuthoritativeP01ToP10Records: [],
   };
+}
+
+function lastGateEnableActionProjection(steps: readonly ScenarioStepResult[]): unknown | undefined {
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const value = steps[index]?.result as { gateEnableActionProjection?: unknown } | undefined;
+    if (value?.gateEnableActionProjection !== undefined) return value.gateEnableActionProjection;
+  }
+  return undefined;
 }
 
 function unique<T>(items: T[]): T[] {
