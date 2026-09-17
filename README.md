@@ -2,7 +2,7 @@
 
 Fresh implementation baseline compiled from the current verified AppTS Construction Compiler contract.
 
-Current construction window: B0-B9 complete (skeleton, contract kernel, deterministic simulator, core evaluators, first clean RS-A-022 vertical slice, adverse/break cases, responsibility/handover/dependency/field contracts, verification/closure separation, external/provider reconciliation, durable local AppendBatch persistence/recovery).
+Current construction window: B0-B10 complete (skeleton, contract kernel, deterministic simulator, core evaluators, first clean RS-A-022 vertical slice, adverse/break cases, responsibility/handover/dependency/field contracts, verification/closure separation, external/provider reconciliation, durable local AppendBatch persistence/recovery, and thin boundary adapters).
 
 B5 exercises fail-closed behavior before expanding capabilities.
 
@@ -14,7 +14,9 @@ B8 preserves the external-effect uncertainty boundary: provider completion is ev
 
 B9 adds a bounded segmented LocalJsonlStore. Each committed segment contains exactly one newline-terminated authoritative AppendBatch record. Writes stage through `.partial` then rename to `.jsonl`; incomplete/malformed final tails are non-committed and may be quarantined without rewriting valid history; malformed interior history or version disorder fails closed; restart replays only contiguous committed versions. Derived evidence indexes are rebuildable and never originating truth. Exact fsync/filesystem durability remains an implementation choice and no production durability claim is made.
 
-Next construction window: B10 thin boundary adapters only after kernel verification remains green.
+B10 adds thin transport/identity/field boundaries without importing workflow semantics. Authenticated identity remains identity evidence only and cannot create Role/Authority/Acting Context. Field synchronization preserves Field evidence without creating Purpose responsibility, restoration, or Service Verification. The command boundary forwards the already-typed ActionCommandEnvelope unchanged to the governed handler; it owns no domain decision.
+
+Next gate: run the complete RESTORE_SERVICE executable verification surface, close any implementation defects found, then prepare the bounded staging/deployment adapter against verified current infrastructure facts.
 
 This repository intentionally does **not** import Trial #2 domain/workflow semantics. Historical Git history remains available for archaeology only.
 
@@ -42,4 +44,5 @@ Runtime dependencies for the bounded kernel: none.
 - Incomplete final persistence writes never become committed truth.
 - Interior persistence corruption/version disorder fails closed.
 - Derived indexes/projections never become originating truth.
+- Boundary adapters do not own domain semantics or authority.
 - Industry-informed, not industry-copied.
