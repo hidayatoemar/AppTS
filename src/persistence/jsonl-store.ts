@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile, rename, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { ActionCommandEnvelope, ScopeRef } from "../contracts/ce-di.js";
+import type { ScopeRef } from "../contracts/ce-di.js";
 import type { Ref } from "../contracts/ids.js";
 import type { ScopeSnapshot } from "../runtime/runtime-composition.js";
 import { scopeKey } from "../runtime/runtime-composition.js";
@@ -174,25 +174,17 @@ export class LocalJsonlStore implements ScopeRepository {
     const key = scopeKey(scopeRef);
     const previous = this.locks.get(key) ?? Promise.resolve();
     let release!: () => void;
-    const current = new Promise<void>((resolve) => { release = resolve; });
-    this.locks.set(key, previous.then(() => current));
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const queued = previous.then(() => gate);
+    this.locks.set(key, queued);
     await previous;
     try {
       return await operation();
     } finally {
       release();
-      if (this.locks.get(key) === current) this.locks.delete(key);
+      if (this.locks.get(key) === queued) this.locks.delete(key);
     }
   }
-}
-
-export const normalizeCommandEnvelope = (envelope: ActionCommandEnvelope): string => stableStringify(envelope);
-
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(",")}}`;
 }
 
 function sanitize(value: string): string {
