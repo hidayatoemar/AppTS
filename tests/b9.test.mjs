@@ -38,7 +38,7 @@ const evidence = (id) => ({
 const batch = (id, { effect = false, evidenceId = `EV-${id}` } = {}) => ({
   commitId: id,
   scopeRef: scope,
-  executionRecords: [],
+  actionExecutions: [],
   materialEffects: effect
     ? [{
         effectId: `EF-${id}`,
@@ -54,12 +54,12 @@ const batch = (id, { effect = false, evidenceId = `EV-${id}` } = {}) => ({
         residualObligationRefs: [],
       }]
     : [],
-  determiningEvidence: [evidence(evidenceId)],
-  responsibilityHandoverRefs: [],
-  dependencyWaitingRefs: [],
+  evidenceProvenance: [evidence(evidenceId)],
+  responsibilityHandoverEffects: [],
+  dependencyWaitingUpdates: [],
   residualObligationRefs: ["OB-1"],
-  verificationClosureRefs: [],
-  otherAuthoritativeRefs: [],
+  verificationClosureEffects: [],
+  otherAuthoritativeP01ToP10Records: [],
 });
 
 async function withStore(fn) {
@@ -129,6 +129,7 @@ test("B9 restart/replay recovers last contiguous valid committed record", async 
     const snapshot = await restarted.replay(scope);
     assert.equal(snapshot.version, 2);
     assert.deepEqual(snapshot.truthRefs, ["UP"]);
+    assert.equal(snapshot.materialEffects.length, 1);
   }));
 
 test("B9 next expectedVersion derives from recovered version after incomplete tail", async () =>
@@ -163,4 +164,93 @@ test("B9 derived evidence index loss/rebuild does not alter authoritative truth"
     assert.equal((await store.replay(scope)).version, 1);
     await index.rebuildFromAuthoritativeHistory(scope, store);
     assert.equal(index.readIndex(["EV-INDEX"]).length, 1);
+  }));
+
+test("CODE-F03 restart/replay reconstructs confirmed responsibility handover", async () =>
+  withStore(async (store, dir) => {
+    const authoritative = batch("C1");
+    authoritative.responsibilityHandoverEffects = [{
+      handoverRef: "HO-1",
+      scopeRef: scope,
+      fromResponsibilityRef: "R1",
+      proposedHolderPersonRef: "P2",
+      proposedRoleRef: "NOC-2",
+      proposedAssignmentRef: "A2",
+      accepted: true,
+      confirmedEffective: true,
+      failedOrTimedOut: false,
+      effectiveTime: "2026-09-18T00:01:00Z",
+      evidenceRefs: ["EV-HO"],
+      provenance: { sourceRefs: ["EV-HO"], chainRefs: [] },
+    }];
+    await store.append(0, authoritative);
+    const restarted = new LocalJsonlStore(dir);
+    restarted.seed(baseline);
+    const snapshot = await restarted.replay(scope);
+    assert.equal(snapshot.responsibility.holderPersonRef, "P2");
+    assert.equal(snapshot.responsibilityHandoverEffects.length, 1);
+  }));
+
+test("CODE-F03 restart/replay reconstructs dependency waiting updates", async () =>
+  withStore(async (store, dir) => {
+    const dep = {
+      dependencyRef: "DEP-X",
+      scopeRef: scope,
+      requiredConditionRef: "COND-X",
+      requiredCapabilityOrAuthorityRefs: [],
+      openedAt: "2026-09-18T00:00:00Z",
+      blockedActionIds: ["RS-A-022"],
+      alternateLawfulPathRefs: [],
+      escalationObligationRefs: [],
+      communicationObligationRefs: [],
+      satisfied: false,
+      satisfactionEvidenceRefs: [],
+      currentness: { status: "CURRENT" },
+      provenance: { sourceRefs: ["EV-D1"], chainRefs: [] },
+    };
+    const first = batch("C1");
+    first.dependencyWaitingUpdates = [dep];
+    await store.append(0, first);
+    const second = batch("C2");
+    second.dependencyWaitingUpdates = [{ ...dep, satisfied: true, satisfactionEvidenceRefs: ["EV-DONE"] }];
+    await store.append(1, second);
+    const restarted = new LocalJsonlStore(dir);
+    restarted.seed(baseline);
+    const snapshot = await restarted.replay(scope);
+    assert.deepEqual(snapshot.dependencyRefs, []);
+    assert.equal(snapshot.dependencyWaitingUpdates.length, 1);
+    assert.equal(snapshot.dependencyWaitingUpdates[0].satisfied, true);
+  }));
+
+test("CODE-F03 restart/replay retains residual obligations", async () =>
+  withStore(async (store, dir) => {
+    const authoritative = batch("C1");
+    authoritative.residualObligationRefs = ["OB-RETAIN"];
+    await store.append(0, authoritative);
+    const restarted = new LocalJsonlStore(dir);
+    restarted.seed(baseline);
+    assert.ok((await restarted.replay(scope)).residualObligationRefs.includes("OB-RETAIN"));
+  }));
+
+test("CODE-F03 restart/replay reconstructs verification closure effects", async () =>
+  withStore(async (store, dir) => {
+    const authoritative = batch("C1");
+    authoritative.verificationClosureEffects = [{
+      scopeRef: scope,
+      workCompleted: true,
+      materialRestorationEstablished: true,
+      serviceVerified: true,
+      customerVerified: false,
+      closureEligible: false,
+      closureDecisionAuthorized: false,
+      residualObligationRefs: ["OB-CUSTOMER"],
+      prohibitedInferences: ["service_verification_does_not_establish_customer_verification"],
+    }];
+    await store.append(0, authoritative);
+    const restarted = new LocalJsonlStore(dir);
+    restarted.seed(baseline);
+    const snapshot = await restarted.replay(scope);
+    assert.equal(snapshot.verificationClosureEffects.length, 1);
+    assert.equal(snapshot.verificationClosureEffects[0].serviceVerified, true);
+    assert.ok(snapshot.residualObligationRefs.includes("OB-CUSTOMER"));
   }));
