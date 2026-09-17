@@ -22,7 +22,7 @@ export class InMemoryStore implements ScopeRepository {
     return clone(this.requireEntry(scopeRef).snapshot);
   }
 
-  async append(expectedVersion: number, batch: AppendBatch): Promise<{ newVersion: number }> {
+  async append(expectedVersion: number, batch: AppendBatch): Promise<{ newVersion: number; commitId: string }> {
     const entry = this.requireEntry(batch.scopeRef);
     if (entry.snapshot.version !== expectedVersion) {
       throw new Error(`STALE_EXPECTED_VERSION:${expectedVersion}:actual=${entry.snapshot.version}`);
@@ -45,7 +45,7 @@ export class InMemoryStore implements ScopeRepository {
       });
     }
 
-    return { newVersion: nextVersion };
+    return { newVersion: nextVersion, commitId: batch.commitId };
   }
 
   async replay(scopeRef: ScopeRef): Promise<ScopeSnapshot> {

@@ -32,7 +32,7 @@ export interface AppendBatch {
 
 export interface ScopeRepository {
   load(scopeRef: ScopeRef): Promise<ScopeSnapshot>;
-  append(expectedVersion: number, batch: AppendBatch): Promise<{ newVersion: number }>;
+  append(expectedVersion: number, batch: AppendBatch): Promise<{ newVersion: number; commitId: Ref }>;
   replay(scopeRef: ScopeRef): Promise<ScopeSnapshot>;
   findCommand(commandId: Ref): Promise<StoredCommandIdentity | null>;
 }

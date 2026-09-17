@@ -15,4 +15,6 @@ export * from "./runtime/verification-closure.js";
 export * from "./runtime/external-reconciliation-controller.js";
 export * from "./adapters/external-effect-port.js";
 export * from "./persistence/in-memory-store.js";
+export * from "./persistence/jsonl-store.js";
+export * from "./persistence/derived-evidence-index.js";
 export * from "./simulator/harness.js";
