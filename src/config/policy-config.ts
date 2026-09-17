@@ -9,4 +9,5 @@ export const firstSlicePolicy: PolicyConfig = {
   },
   gateByAction: { "RS-A-022": "READY" },
   enableByAction: { "RS-A-022": "ENABLED" },
+  boundedMachineAuthorityRefsByAction: {},
 };
