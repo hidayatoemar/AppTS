@@ -53,6 +53,13 @@ export async function executeCommand(
   const requiredAuthorityRef = deps.requiredAuthorityRefByAction[envelope.actionId];
   if (!requiredAuthorityRef) return { kind: "REJECTED", reasons: ["missing_required_authority_binding"] };
 
+  if (envelope.boundedMachineAuthorityRef) {
+    const allowedMachineAuthorities = deps.policy.boundedMachineAuthorityRefsByAction[envelope.actionId] ?? [];
+    if (!allowedMachineAuthorities.includes(envelope.boundedMachineAuthorityRef)) {
+      return { kind: "REJECTED", reasons: ["bounded_machine_authority_not_pre_authorized"] };
+    }
+  }
+
   let actingContext: ActingContextResolution | null = null;
   if (!envelope.boundedMachineAuthorityRef) {
     actingContext = resolveActingContext({
@@ -85,9 +92,12 @@ export async function executeCommand(
     inputVersion: snapshot.version,
   });
 
-  const contextCurrent = envelope.boundedMachineAuthorityRef
-    ? true
-    : actingContext?.kind === "EXACT_ONE" && actingContext.candidate.currentness.status === "CURRENT";
+  const responsibilityCurrent = snapshot.responsibility.currentness.status === "CURRENT";
+  const contextCurrent =
+    responsibilityCurrent &&
+    (envelope.boundedMachineAuthorityRef
+      ? true
+      : actingContext?.kind === "EXACT_ONE" && actingContext.candidate.currentness.status === "CURRENT");
   const contextIntegrity = envelope.boundedMachineAuthorityRef
     ? true
     : actingContext?.kind === "EXACT_ONE" && actingContext.candidate.integrity.sufficient && !actingContext.candidate.integrity.conflict;
