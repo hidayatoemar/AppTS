@@ -1,3 +1,0 @@
-import type { DiagnosticAlertAcknowledgment } from "@appts-restore-service/contracts";
-export interface AlertAcknowledgmentEffect { readonly acknowledgment: DiagnosticAlertAcknowledgment; readonly lifecycleChanged: false; readonly retryAuthorized: false; readonly ticketClosed: false; readonly releaseApproved: false; readonly authorityWidened: false; }
-export function recordAlertAcknowledgment(acknowledgment: DiagnosticAlertAcknowledgment): AlertAcknowledgmentEffect { return Object.freeze({ acknowledgment: Object.freeze({ ...acknowledgment }), lifecycleChanged: false, retryAuthorized: false, ticketClosed: false, releaseApproved: false, authorityWidened: false }); }

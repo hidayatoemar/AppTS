@@ -1,28 +1,7 @@
-.slim/deepwork/
-
-# Dependencies — rebuild with npm ci
-node_modules/
-**/node_modules/
-
-# Build output
 dist/
-**/dist/
-*.tsbuildinfo
-
-# Filled env files (templates are OK, filled copies are not)
-deploy/db/.env.b01
-deploy/db/.env.g7
-deploy/compose/.env
-
-# OS / editor
+node_modules/
+*.log
+.env
+.env.*
+!.env.example
 .DS_Store
-Thumbs.db
-
-# AI / tool artifacts (local only, not project artifacts)
-.lcm/
-.opencode/
-.slim/
-lcm.db
-lcm.db-shm
-lcm.db-wal
-index

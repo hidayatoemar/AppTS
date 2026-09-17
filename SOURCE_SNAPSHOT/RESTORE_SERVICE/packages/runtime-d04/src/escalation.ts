@@ -1,3 +1,0 @@
-export interface RuntimeEscalation { readonly escalationId: string; readonly ticketId: string; readonly sourceObligationRef: string; readonly status: "OPEN" | "INTERVENTION_FAILED" | "RESOLVED"; readonly responsibilityTransferred: false; }
-export function createEscalation(escalationId: string, ticketId: string, sourceObligationRef: string): RuntimeEscalation { return Object.freeze({ escalationId, ticketId, sourceObligationRef, status: "OPEN", responsibilityTransferred: false }); }
-export function recordFailedIntervention(escalation: RuntimeEscalation): RuntimeEscalation { return Object.freeze({ ...escalation, status: "INTERVENTION_FAILED", responsibilityTransferred: false }); }

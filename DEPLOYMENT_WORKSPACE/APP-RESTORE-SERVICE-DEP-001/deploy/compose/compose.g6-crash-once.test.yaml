@@ -1,7 +1,0 @@
-services:
-  api:
-    profiles:
-      - g6-crash-test
-    entrypoint: ["/usr/local/lib/dep/entrypoint.g6-crash-once.test.sh"]
-    environment:
-      DEP_G6_CRASH_ONCE: "DEP-001-G6-CRASH-ONCE"

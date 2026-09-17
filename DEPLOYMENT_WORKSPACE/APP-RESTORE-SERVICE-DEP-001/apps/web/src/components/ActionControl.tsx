@@ -1,2 +1,0 @@
-export type ActionPresentation={readonly state:"ENABLED"}|{readonly state:"DISABLED";readonly reason:string}|{readonly state:"HIDDEN"};
-export function ActionControl({label,presentation,onInvoke}:{label:string;presentation:ActionPresentation;onInvoke:()=>void}){if(presentation.state==="HIDDEN")return null;return <button disabled={presentation.state==="DISABLED"} title={presentation.state==="DISABLED"?presentation.reason:undefined} onClick={onInvoke}>{label}</button>}

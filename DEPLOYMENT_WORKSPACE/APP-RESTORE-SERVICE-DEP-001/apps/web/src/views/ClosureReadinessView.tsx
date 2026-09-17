@@ -1,1 +1,0 @@
-import{ViewFrame}from"../components/ViewFrame.tsx";export function ClosureReadinessView(){return <ViewFrame viewId="UX-RS-11" title="Terminal / Closure Readiness"><p>Readiness is server-derived; no arbitrary complete control exists.</p></ViewFrame>}

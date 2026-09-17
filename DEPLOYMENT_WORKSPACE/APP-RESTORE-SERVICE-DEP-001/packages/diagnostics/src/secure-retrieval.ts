@@ -1,3 +1,0 @@
-import type { SecureDiagnosticRetrievalInput, SecureDiagnosticRetrievalOutput } from "@appts-restore-service/contracts";
-export interface SecureBundleRepository { findPermitted(input: SecureDiagnosticRetrievalInput): Promise<SecureDiagnosticRetrievalOutput | undefined>; }
-export async function retrieveSecureDiagnostic(input: SecureDiagnosticRetrievalInput, authorized: boolean, repository: SecureBundleRepository): Promise<SecureDiagnosticRetrievalOutput> { if (!authorized) throw new Error("DIAGNOSTIC_RETRIEVAL_FORBIDDEN"); const result = await repository.findPermitted(input); if (!result) throw new Error("DIAGNOSTIC_BUNDLE_NOT_FOUND"); return Object.freeze({ ...result }); }
