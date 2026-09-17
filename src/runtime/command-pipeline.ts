@@ -2,7 +2,6 @@ import type {
   ActionCommandEnvelope,
   ActionExecutionRecord,
   ActingContextResolution,
-  EvidenceProvenanceRef,
   MaterialEffectRecord,
 } from "../contracts/ce-di.js";
 import type { PolicyConfig } from "../contracts/policy.js";
@@ -16,6 +15,9 @@ import { resolveActingContext } from "./acting-context-resolver.js";
 import { evaluateGateEnable } from "./gate-enable-evaluator.js";
 import { projectLawfulAction } from "./lawful-action-set.js";
 import { resolveRsA022Bindings, RS_A_022 } from "./rs-a-022-binding.js";
+import { executeActionCommand } from "./action-command-executor.js";
+import { recordMaterialEffects } from "./effect-recorder.js";
+import { recordDeterminingEvidence } from "./evidence-provenance-recorder.js";
 
 export type CommandPipelineResult =
   | { kind: "REPLAY"; execution: ActionExecutionRecord; effects: MaterialEffectRecord[] }
@@ -121,7 +123,7 @@ export async function executeCommand(
   if (envelope.actionId !== RS_A_022) return { kind: "REJECTED", reasons: ["first_slice_action_not_implemented"] };
 
   const activeBindings = resolveRsA022Bindings(envelope.scopeRef, deps.policy);
-  const outcome = await deps.executor.execute(envelope, activeBindings);
+  const outcome = await executeActionCommand(deps.executor, envelope, activeBindings);
   const execution: ActionExecutionRecord = {
     commandId: envelope.commandId,
     accepted: true,
@@ -135,41 +137,8 @@ export async function executeCommand(
     uncertaintyFlag: outcome.uncertaintyFlag,
   };
 
-  const effects: MaterialEffectRecord[] = [];
-  if (outcome.resultantEffect) {
-    effects.push({
-      effectId: deps.ids.next("effect"),
-      commandId: envelope.commandId,
-      actionId: envelope.actionId,
-      scopeRef: envelope.scopeRef,
-      effectTypeRef: outcome.resultantEffect.effectTypeRef,
-      beforeTruthRefs: outcome.resultantEffect.beforeTruthRefs,
-      afterTruthRefs: outcome.resultantEffect.afterTruthRefs,
-      materialEffectEstablished: outcome.resultantEffect.materialEffectEstablished,
-      noEffectOrFailureReason: outcome.resultantEffect.noEffectOrFailureReason,
-      observationTime: deps.clock.now(),
-      effectiveTime: deps.clock.now(),
-      actorOrMachineRef: envelope.requestedByActorOrMachineRef,
-      actingContextRef: envelope.actingContextRef,
-      evidenceRefs: outcome.resultantEffect.evidenceRefs,
-      provenance: { sourceRefs: outcome.resultantEffect.evidenceRefs, chainRefs: outcome.executionEvidenceRefs },
-      currentness: { status: "CURRENT" },
-      residualObligationRefs: [],
-    });
-  }
-
-  const determiningEvidence: EvidenceProvenanceRef[] = [
-    ...new Set([...outcome.executionEvidenceRefs, ...effects.flatMap((effect) => effect.evidenceRefs)]),
-  ].map((evidenceId) => ({
-    evidenceId,
-    sourceType: "BOUNDED_EXECUTION",
-    sourceRef: envelope.commandId,
-    actorOrSystemRef: outcome.executorRef,
-    receivedTime: deps.clock.now(),
-    currentness: { status: "CURRENT" },
-    payloadOrRecordRef: evidenceId,
-    provenanceChain: [],
-  }));
+  const effects = recordMaterialEffects(envelope, outcome, deps.clock, deps.ids);
+  const determiningEvidence = recordDeterminingEvidence(envelope, outcome, effects, deps.clock);
 
   const commit = await deps.repository.append(snapshot.version, {
     commitId: deps.ids.next("commit"),
