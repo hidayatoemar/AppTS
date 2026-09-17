@@ -1,5 +1,6 @@
 import type { ResponsibilityContext } from "../contracts/ce-di.js";
 import type { ResponsibilityHandoverEvaluation, ResponsibilityHandoverRecord } from "../contracts/b6.js";
+import { scopeKey } from "./runtime-composition.js";
 
 export function evaluateResponsibilityHandover(
   current: ResponsibilityContext,
@@ -11,11 +12,7 @@ export function evaluateResponsibilityHandover(
   if (!handover.confirmedEffective) reasons.push("handover_not_confirmed_effective");
   if (!handover.effectiveTime) reasons.push("handover_effective_time_missing");
   if (handover.failedOrTimedOut) reasons.push("handover_failed_or_timed_out");
-  if (
-    handover.scopeRef.situationId !== current.scopeRef.situationId ||
-    handover.scopeRef.subjectType !== current.scopeRef.subjectType ||
-    handover.scopeRef.subjectId !== current.scopeRef.subjectId
-  ) reasons.push("handover_scope_mismatch");
+  if (scopeKey(handover.scopeRef) !== scopeKey(current.scopeRef)) reasons.push("handover_scope_mismatch");
 
   if (reasons.length > 0) {
     return {

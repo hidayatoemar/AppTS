@@ -40,7 +40,6 @@ export async function executeCommand(
   minimallyValidate(envelope);
   const normalized = normalizeCommandEnvelope(envelope);
 
-  // Replay identity is resolved BEFORE mutable-world preconditions.
   const committed = await deps.repository.findCommand(envelope.commandId);
   if (committed) {
     if (committed.normalizedEnvelope !== normalized) throw new Error("IMPLEMENTATION_REPLAY_CONFLICT");
@@ -138,21 +137,25 @@ export async function executeCommand(
   };
 
   const effects = recordMaterialEffects(envelope, outcome, deps.clock, deps.ids);
-  const determiningEvidence = recordDeterminingEvidence(envelope, outcome, effects, deps.clock);
+  const evidenceProvenance = recordDeterminingEvidence(envelope, outcome, effects, deps.clock);
 
   const commit = await deps.repository.append(snapshot.version, {
     commitId: deps.ids.next("commit"),
     scopeRef: envelope.scopeRef,
-    normalizedCommandIdentity: normalized,
-    command: envelope,
-    executionRecords: [execution],
+    commandReplayIdentity: {
+      commandId: envelope.commandId,
+      normalizedEnvelope: normalized,
+      execution,
+      effects,
+    },
+    actionExecutions: [execution],
     materialEffects: effects,
-    determiningEvidence,
-    responsibilityHandoverRefs: [],
-    dependencyWaitingRefs: [],
-    residualObligationRefs: [],
-    verificationClosureRefs: [],
-    otherAuthoritativeRefs: [],
+    evidenceProvenance,
+    responsibilityHandoverEffects: [],
+    dependencyWaitingUpdates: [],
+    residualObligationRefs: effects.flatMap((effect) => effect.residualObligationRefs),
+    verificationClosureEffects: [],
+    otherAuthoritativeP01ToP10Records: [],
   });
 
   return { kind: "COMMITTED", execution, effects, newVersion: commit.newVersion };

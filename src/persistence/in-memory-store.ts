@@ -2,6 +2,7 @@ import type { ActionCommandEnvelope, ScopeRef } from "../contracts/ce-di.js";
 import type { AppendBatch, ScopeRepository, StoredCommandIdentity } from "./ports.js";
 import type { ScopeSnapshot } from "../runtime/runtime-composition.js";
 import { scopeKey } from "../runtime/runtime-composition.js";
+import { applyAuthoritativeBatch, prepareScopeSnapshot } from "./replay.js";
 
 const clone = <T>(value: T): T => structuredClone(value);
 
@@ -10,7 +11,7 @@ export class InMemoryStore implements ScopeRepository {
   private readonly commands = new Map<string, StoredCommandIdentity>();
 
   seed(snapshot: ScopeSnapshot): void {
-    this.scopes.set(scopeKey(snapshot.scopeRef), { snapshot: clone(snapshot), batches: [] });
+    this.scopes.set(scopeKey(snapshot.scopeRef), { snapshot: prepareScopeSnapshot(snapshot), batches: [] });
   }
 
   mutateForTest(scopeRef: ScopeRef, mutate: (snapshot: ScopeSnapshot) => void): void {
@@ -30,19 +31,10 @@ export class InMemoryStore implements ScopeRepository {
 
     const nextVersion = expectedVersion + 1;
     entry.batches.push(clone(batch));
-    entry.snapshot.version = nextVersion;
-    for (const effect of batch.materialEffects) {
-      if (effect.materialEffectEstablished) entry.snapshot.truthRefs = [...effect.afterTruthRefs];
-      entry.snapshot.evidenceRefs.push(...effect.evidenceRefs);
-    }
+    applyAuthoritativeBatch(entry.snapshot, nextVersion, batch);
 
-    if (batch.command && batch.normalizedCommandIdentity && batch.executionRecords.length === 1) {
-      this.commands.set(batch.command.commandId, {
-        commandId: batch.command.commandId,
-        normalizedEnvelope: batch.normalizedCommandIdentity,
-        execution: clone(batch.executionRecords[0]),
-        effects: clone(batch.materialEffects),
-      });
+    if (batch.commandReplayIdentity) {
+      this.commands.set(batch.commandReplayIdentity.commandId, clone(batch.commandReplayIdentity));
     }
 
     return { newVersion: nextVersion, commitId: batch.commitId };

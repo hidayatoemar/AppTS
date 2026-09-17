@@ -22,6 +22,6 @@ export class DerivedEvidenceIndex {
 
   async rebuildFromAuthoritativeHistory(scopeRef: ScopeRef, store: LocalJsonlStore): Promise<void> {
     const recovery = await store.recoverRecords(scopeRef);
-    for (const record of recovery.records) this.indexCommittedEvidence(record.batch.determiningEvidence);
+    for (const record of recovery.records) this.indexCommittedEvidence(record.batch.evidenceProvenance);
   }
 }

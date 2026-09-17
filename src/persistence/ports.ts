@@ -1,12 +1,13 @@
 import type {
-  ActionCommandEnvelope,
   ActionExecutionRecord,
   EvidenceProvenanceRef,
   MaterialEffectRecord,
   ScopeRef,
 } from "../contracts/ce-di.js";
+import type { DependencyWaitingRecord, ResponsibilityHandoverRecord } from "../contracts/b6.js";
+import type { VerificationClosureEvaluation } from "../contracts/b7.js";
 import type { Ref } from "../contracts/ids.js";
-import type { ScopeSnapshot } from "../runtime/runtime-composition.js";
+import type { AuthoritativeP01ToP10Record, ScopeSnapshot } from "../runtime/runtime-composition.js";
 
 export interface StoredCommandIdentity {
   commandId: Ref;
@@ -18,16 +19,15 @@ export interface StoredCommandIdentity {
 export interface AppendBatch {
   commitId: Ref;
   scopeRef: ScopeRef;
-  normalizedCommandIdentity?: string;
-  command?: ActionCommandEnvelope;
-  executionRecords: ActionExecutionRecord[];
+  commandReplayIdentity?: StoredCommandIdentity;
+  actionExecutions: ActionExecutionRecord[];
   materialEffects: MaterialEffectRecord[];
-  determiningEvidence: EvidenceProvenanceRef[];
-  responsibilityHandoverRefs: Ref[];
-  dependencyWaitingRefs: Ref[];
+  evidenceProvenance: EvidenceProvenanceRef[];
+  responsibilityHandoverEffects: ResponsibilityHandoverRecord[];
+  dependencyWaitingUpdates: DependencyWaitingRecord[];
   residualObligationRefs: Ref[];
-  verificationClosureRefs: Ref[];
-  otherAuthoritativeRefs: Ref[];
+  verificationClosureEffects: VerificationClosureEvaluation[];
+  otherAuthoritativeP01ToP10Records: readonly AuthoritativeP01ToP10Record[];
 }
 
 export interface ScopeRepository {

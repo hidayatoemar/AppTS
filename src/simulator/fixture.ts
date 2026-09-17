@@ -1,5 +1,26 @@
-import type { ActingContextCandidate, ResponsibilityContext, ScopeRef } from "../contracts/ce-di.js";
+import type {
+  ActingContextCandidate,
+  Currentness,
+  EvidenceProvenanceRef,
+  ResponsibilityContext,
+  ScopeRef,
+} from "../contracts/ce-di.js";
+import type { DependencyWaitingRecord } from "../contracts/b6.js";
+import type { IsoInstant } from "../contracts/ids.js";
+import type { PolicyConfig } from "../contracts/policy.js";
 import type { ScopeSnapshot } from "../runtime/runtime-composition.js";
+import { firstSlicePolicy } from "../config/policy-config.js";
+
+export interface Fixture {
+  initialScopedTruths: ScopeSnapshot[];
+  responsibilities: ResponsibilityContext[];
+  actingContextFacts: ActingContextCandidate[];
+  dependencies: DependencyWaitingRecord[];
+  evidence: EvidenceProvenanceRef[];
+  currentness: Currentness[];
+  policyConfigInputs: PolicyConfig;
+  clock: IsoInstant;
+}
 
 export const makeServiceScope = (): ScopeRef => ({ situationId: "SIT-001", subjectType: "SERVICE", subjectId: "SVC-001" });
 
@@ -43,4 +64,24 @@ export const makeSnapshot = (scopeRef: ScopeRef, candidates = [makeCandidate(sco
   responsibility: makeResponsibility(scopeRef),
   actingContextCandidates: candidates,
   dependencyRefs: [],
+  actionExecutions: [],
+  materialEffects: [],
+  evidenceProvenance: [],
+  responsibilityHandoverEffects: [],
+  dependencyWaitingUpdates: [],
+  residualObligationRefs: [],
+  verificationClosureEffects: [],
+  otherAuthoritativeP01ToP10Records: [],
+});
+
+export const makeFixture = (snapshots: ScopeSnapshot[], overrides: Partial<Fixture> = {}): Fixture => ({
+  initialScopedTruths: snapshots,
+  responsibilities: snapshots.map((snapshot) => snapshot.responsibility),
+  actingContextFacts: snapshots.flatMap((snapshot) => snapshot.actingContextCandidates),
+  dependencies: snapshots.flatMap((snapshot) => snapshot.dependencyWaitingUpdates),
+  evidence: snapshots.flatMap((snapshot) => snapshot.evidenceProvenance),
+  currentness: snapshots.flatMap((snapshot) => [snapshot.responsibility.currentness, ...snapshot.actingContextCandidates.map((candidate) => candidate.currentness)]),
+  policyConfigInputs: firstSlicePolicy,
+  clock: "2026-09-17T12:00:00.000Z",
+  ...overrides,
 });
