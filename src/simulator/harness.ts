@@ -4,9 +4,10 @@ import type { ExternalExecutionObservation, ExternalReconciliationEvidence } fro
 import type { PolicyConfig } from "../contracts/policy.js";
 import { firstSlicePolicy } from "../config/policy-config.js";
 import { InMemoryStore } from "../persistence/in-memory-store.js";
+import type { AppendBatch } from "../persistence/ports.js";
 import type { CommandPipelineResult } from "../runtime/command-pipeline.js";
 import { executeCommand } from "../runtime/command-pipeline.js";
-import type { ScopeSnapshot } from "../runtime/runtime-composition.js";
+import type { AuthoritativeP01ToP10Record, ScopeSnapshot } from "../runtime/runtime-composition.js";
 import { scopeKey } from "../runtime/runtime-composition.js";
 import { ManualClock } from "./clock.js";
 import type { Fixture } from "./fixture.js";
@@ -150,9 +151,9 @@ export class ScenarioHarness {
 
   private async appendExternalResponse(stimulus: ExternalResponseStimulus) {
     const snapshot = await this.store.load(stimulus.scopeRef);
-    const records = [];
-    if (stimulus.observation) records.push({ family: "P08_EXTERNAL_EXECUTION_OBSERVATION" as const, record: stimulus.observation });
-    if (stimulus.reconciliationEvidence) records.push({ family: "P08_EXTERNAL_RECONCILIATION_EVIDENCE" as const, record: stimulus.reconciliationEvidence });
+    const records: AuthoritativeP01ToP10Record[] = [];
+    if (stimulus.observation) records.push({ family: "P08_EXTERNAL_EXECUTION_OBSERVATION", record: stimulus.observation });
+    if (stimulus.reconciliationEvidence) records.push({ family: "P08_EXTERNAL_RECONCILIATION_EVIDENCE", record: stimulus.reconciliationEvidence });
     const batch = emptyBatch(this.ids.next("sim-external"), stimulus.scopeRef, []);
     batch.otherAuthoritativeP01ToP10Records = records;
     return this.store.append(snapshot.version, batch);
@@ -185,10 +186,10 @@ export class ScenarioHarness {
 }
 
 function isRawCommand(input: ActionCommandEnvelope | Stimulus | Stimulus[]): input is ActionCommandEnvelope {
-  return !Array.isArray(input) && "commandId" in input && !('kind' in input);
+  return !Array.isArray(input) && "commandId" in input && !("kind" in input);
 }
 
-function emptyBatch(commitId: string, scopeRef: ScopeRef, evidenceProvenance: EvidenceProvenanceRef[]) {
+function emptyBatch(commitId: string, scopeRef: ScopeRef, evidenceProvenance: EvidenceProvenanceRef[]): AppendBatch {
   return {
     commitId,
     scopeRef,
