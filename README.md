@@ -2,13 +2,15 @@
 
 Fresh implementation baseline compiled from the current verified AppTS Construction Compiler contract.
 
-Current construction window: B0-B6 complete (skeleton, contract kernel, deterministic simulator, core evaluators, first clean RS-A-022 vertical slice, adverse/break cases, responsibility/handover/dependency/field contracts).
+Current construction window: B0-B7 complete (skeleton, contract kernel, deterministic simulator, core evaluators, first clean RS-A-022 vertical slice, adverse/break cases, responsibility/handover/dependency/field contracts, verification/closure separation).
 
-B5 deliberately exercises fail-closed behavior before expanding capabilities. The suite covers ambiguous/no Acting Context, stale/integrity failures, dependencies, Gate/Enable blocking, replay conflicts, NO_EFFECT vs FAILED, sibling-scope isolation, bounded-machine pre-authorization, and stale Situation Responsibility.
+B5 exercises fail-closed behavior before expanding capabilities.
 
 B6 preserves responsibility continuity and plural operational truth: handover initiation/acceptance does not transfer responsibility; only a governed confirmed-effective handover may transfer applicable responsibility; timeout/failure creates an intervention obligation; ACK/follow-up alone cannot release a dependency; Field COMPLETED does not establish restoration, Service Verification, or Purpose responsibility transfer.
 
-Next construction window: B7 verification / closure separation.
+B7 keeps Work Completed, material restoration, Service Verification, Customer Verification, Closure Eligibility, and Closure Decision as independent truth dimensions. Residual obligations remain independently live where governed.
+
+Next construction window: B8 external/provider reconciliation.
 
 This repository intentionally does **not** import Trial #2 domain/workflow semantics. Historical Git history remains available for archaeology only.
 

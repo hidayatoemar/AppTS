@@ -1,6 +1,7 @@
 export * from "./contracts/ce-di.js";
 export * from "./contracts/results.js";
 export * from "./contracts/b6.js";
+export * from "./contracts/b7.js";
 export * from "./runtime/acting-context-resolver.js";
 export * from "./runtime/gate-enable-evaluator.js";
 export * from "./runtime/lawful-action-set.js";
@@ -9,5 +10,6 @@ export * from "./runtime/rs-a-022-binding.js";
 export * from "./runtime/responsibility-handover.js";
 export * from "./runtime/dependency-waiting.js";
 export * from "./runtime/field-work.js";
+export * from "./runtime/verification-closure.js";
 export * from "./persistence/in-memory-store.js";
 export * from "./simulator/harness.js";
