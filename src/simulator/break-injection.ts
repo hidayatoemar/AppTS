@@ -3,7 +3,12 @@ import type { ResponsibilityHandoverRecord } from "../contracts/b6.js";
 import type { ExternalExecutionObservation } from "../contracts/b8.js";
 import type { Ref } from "../contracts/ids.js";
 import type { ScopeSnapshot } from "../runtime/runtime-composition.js";
-import type { EventOrObservationStimulus, ExternalResponseStimulus, TimeoutStimulus } from "./harness.js";
+import type {
+  EventOrObservationStimulus,
+  ExternalResponseStimulus,
+  ResponsibilityHandoverStimulus,
+  TimeoutStimulus,
+} from "./harness.js";
 
 const clone = <T>(value: T): T => structuredClone(value);
 
@@ -45,7 +50,10 @@ export function providerTimeout(scopeRef: ScopeRef, advanceMs: number): TimeoutS
   return { kind: "TIMEOUT", scopeRef, advanceMs };
 }
 
-export function handoverTimeout(current: ResponsibilityContext, handoverRef: Ref = "BREAK-HANDOVER-TIMEOUT"): ResponsibilityHandoverRecord {
+export function handoverTimeoutRecord(
+  current: ResponsibilityContext,
+  handoverRef: Ref = "BREAK-HANDOVER-TIMEOUT",
+): ResponsibilityHandoverRecord {
   return {
     handoverRef,
     scopeRef: clone(current.scopeRef),
@@ -56,6 +64,14 @@ export function handoverTimeout(current: ResponsibilityContext, handoverRef: Ref
     evidenceRefs: [handoverRef],
     provenance: { sourceRefs: [handoverRef], chainRefs: [current.responsibilityRef] },
   };
+}
+
+export function handoverTimeout(
+  current: ResponsibilityContext,
+  handoverRef: Ref = "BREAK-HANDOVER-TIMEOUT",
+): ResponsibilityHandoverStimulus {
+  const handover = handoverTimeoutRecord(current, handoverRef);
+  return { kind: "RESPONSIBILITY_HANDOVER", scopeRef: clone(current.scopeRef), handover };
 }
 
 export function replayedCommand(command: ActionCommandEnvelope): ActionCommandEnvelope {

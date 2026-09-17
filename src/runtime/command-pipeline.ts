@@ -2,6 +2,8 @@ import type {
   ActionCommandEnvelope,
   ActionExecutionRecord,
   ActingContextResolution,
+  GateEnableEvaluationRecord,
+  LawfulActionProjection,
   MaterialEffectRecord,
 } from "../contracts/ce-di.js";
 import type { PolicyConfig } from "../contracts/policy.js";
@@ -19,10 +21,15 @@ import { executeActionCommand } from "./action-command-executor.js";
 import { recordMaterialEffects } from "./effect-recorder.js";
 import { recordDeterminingEvidence } from "./evidence-provenance-recorder.js";
 
+export interface GateEnableActionProjectionView {
+  gateEnable: GateEnableEvaluationRecord;
+  actionProjection: LawfulActionProjection;
+}
+
 export type CommandPipelineResult =
   | { kind: "REPLAY"; execution: ActionExecutionRecord; effects: MaterialEffectRecord[] }
-  | { kind: "REJECTED"; reasons: string[] }
-  | { kind: "COMMITTED"; execution: ActionExecutionRecord; effects: MaterialEffectRecord[]; newVersion: number };
+  | { kind: "REJECTED"; reasons: string[]; gateEnableActionProjection?: GateEnableActionProjectionView }
+  | { kind: "COMMITTED"; execution: ActionExecutionRecord; effects: MaterialEffectRecord[]; newVersion: number; gateEnableActionProjection: GateEnableActionProjectionView };
 
 export interface CommandRuntimeDeps {
   repository: ScopeRepository;
@@ -117,9 +124,10 @@ export async function executeCommand(
     gateEnable,
     dependencyRefs: snapshot.dependencyRefs,
   });
+  const gateEnableActionProjection = { gateEnable, actionProjection: projection };
 
-  if (!projection.available) return { kind: "REJECTED", reasons: projection.blockedReasons };
-  if (envelope.actionId !== RS_A_022) return { kind: "REJECTED", reasons: ["first_slice_action_not_implemented"] };
+  if (!projection.available) return { kind: "REJECTED", reasons: projection.blockedReasons, gateEnableActionProjection };
+  if (envelope.actionId !== RS_A_022) return { kind: "REJECTED", reasons: ["first_slice_action_not_implemented"], gateEnableActionProjection };
 
   const activeBindings = resolveRsA022Bindings(envelope.scopeRef, deps.policy);
   const outcome = await executeActionCommand(deps.executor, envelope, activeBindings);
@@ -158,7 +166,7 @@ export async function executeCommand(
     otherAuthoritativeP01ToP10Records: [],
   });
 
-  return { kind: "COMMITTED", execution, effects, newVersion: commit.newVersion };
+  return { kind: "COMMITTED", execution, effects, newVersion: commit.newVersion, gateEnableActionProjection };
 }
 
 function minimallyValidate(envelope: ActionCommandEnvelope): void {
