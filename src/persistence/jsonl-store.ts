@@ -5,6 +5,7 @@ import type { Ref } from "../contracts/ids.js";
 import type { ScopeSnapshot } from "../runtime/runtime-composition.js";
 import { scopeKey } from "../runtime/runtime-composition.js";
 import type { AppendBatch, ScopeRepository, StoredCommandIdentity } from "./ports.js";
+import { applyAuthoritativeBatch, prepareScopeSnapshot } from "./replay.js";
 
 const clone = <T>(value: T): T => structuredClone(value);
 
@@ -30,7 +31,7 @@ export class LocalJsonlStore implements ScopeRepository {
 
   seed(snapshot: ScopeSnapshot): void {
     if (snapshot.version !== 0) throw new Error("JSONL_BASELINE_VERSION_MUST_BE_ZERO");
-    this.baselines.set(scopeKey(snapshot.scopeRef), clone(snapshot));
+    this.baselines.set(scopeKey(snapshot.scopeRef), prepareScopeSnapshot(snapshot));
   }
 
   streamDirectory(scopeRef: ScopeRef): string {
@@ -44,9 +45,9 @@ export class LocalJsonlStore implements ScopeRepository {
   async replay(scopeRef: ScopeRef): Promise<ScopeSnapshot> {
     const baseline = this.baselines.get(scopeKey(scopeRef));
     if (!baseline) throw new Error(`UNKNOWN_SCOPE:${scopeKey(scopeRef)}`);
-    const snapshot = clone(baseline);
+    const snapshot = prepareScopeSnapshot(baseline);
     const recovery = await this.recoverRecords(scopeRef);
-    for (const record of recovery.records) this.applyBatch(snapshot, record.version, record.batch);
+    for (const record of recovery.records) applyAuthoritativeBatch(snapshot, record.version, record.batch);
     return snapshot;
   }
 
@@ -83,14 +84,8 @@ export class LocalJsonlStore implements ScopeRepository {
     for (const baseline of this.baselines.values()) {
       const recovery = await this.recoverRecords(baseline.scopeRef);
       for (const record of recovery.records) {
-        const batch = record.batch;
-        if (batch.command?.commandId !== commandId || !batch.normalizedCommandIdentity || batch.executionRecords.length !== 1) continue;
-        return {
-          commandId,
-          normalizedEnvelope: batch.normalizedCommandIdentity,
-          execution: clone(batch.executionRecords[0]),
-          effects: clone(batch.materialEffects),
-        };
+        const identity = record.batch.commandReplayIdentity;
+        if (identity?.commandId === commandId) return clone(identity);
       }
     }
     return null;
@@ -156,14 +151,6 @@ export class LocalJsonlStore implements ScopeRepository {
     }
 
     return { records, recoveredVersion: records.length, ignoredFinalTailFiles };
-  }
-
-  private applyBatch(snapshot: ScopeSnapshot, version: number, batch: AppendBatch): void {
-    snapshot.version = version;
-    for (const effect of batch.materialEffects) {
-      if (effect.materialEffectEstablished) snapshot.truthRefs = [...effect.afterTruthRefs];
-      snapshot.evidenceRefs.push(...effect.evidenceRefs);
-    }
   }
 
   private async ensureStreamDir(scopeRef: ScopeRef): Promise<void> {
