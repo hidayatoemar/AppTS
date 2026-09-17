@@ -2,7 +2,7 @@ import type { GateReadiness, EnableState } from "./results.js";
 import type { IsoInstant, Ref } from "./ids.js";
 
 export type Currentness = {
-  status: "CURRENT" | "STALE" | "UNKNOWN";
+  status: "CURRENT" | "STALE" | "CONFLICT" | "UNKNOWN";
   basisRef?: Ref;
 };
 
