@@ -6,4 +6,5 @@ export interface PolicyConfig {
   rsA022BindingsBySubjectType: Readonly<Record<string, readonly Ref[]>>;
   gateByAction: Readonly<Record<string, GateReadiness>>;
   enableByAction: Readonly<Record<string, EnableState>>;
+  boundedMachineAuthorityRefsByAction: Readonly<Record<string, readonly Ref[]>>;
 }
