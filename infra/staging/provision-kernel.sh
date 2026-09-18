@@ -5,13 +5,24 @@ set -euo pipefail
 
 EXPECTED_SHA="${1:?verified commit SHA required}"
 ARTIFACT="${2:?artifact path required}"
+EXPECTED_ARTIFACT_SHA="${3:?artifact SHA256 required}"
 
 if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
   echo "invalid commit SHA"
   exit 2
 fi
+if [[ ! "$EXPECTED_ARTIFACT_SHA" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "invalid artifact SHA256"
+  exit 2
+fi
 if [ ! -f "$ARTIFACT" ]; then
   echo "artifact not found: $ARTIFACT"
+  exit 2
+fi
+
+actual_artifact_sha="$(sha256sum "$ARTIFACT" | awk '{print $1}')"
+if [ "$actual_artifact_sha" != "$EXPECTED_ARTIFACT_SHA" ]; then
+  echo "artifact SHA256 mismatch"
   exit 2
 fi
 
@@ -48,6 +59,7 @@ if [ -e "$RELEASE" ]; then
     echo "existing release path does not match expected immutable release identity"
     exit 4
   fi
+  echo "release_state=ALREADY_PRESENT"
 else
   workdir="$(mktemp -d)"
   trap 'rm -rf "$workdir"' EXIT
@@ -62,6 +74,7 @@ else
   sudo chown -R root:root "$RELEASE"
   sudo find "$RELEASE" -type d -exec chmod 0755 {} +
   sudo find "$RELEASE" -type f -exec chmod 0644 {} +
+  echo "release_state=INSTALLED"
 fi
 
 sudo ln -sfn "$RELEASE" "$CURRENT"
@@ -73,7 +86,12 @@ node --input-type=module -e "
 "
 
 echo "node_version=$(node --version)"
-echo "npm_version=$(npm --version)"
+if command -v npm >/dev/null 2>&1; then
+  echo "npm_version=$(npm --version)"
+else
+  echo "npm_version=NOT_REQUIRED_NOT_INSTALLED"
+fi
+echo "artifact_sha256=$actual_artifact_sha"
 echo "deployed_commit=$(cat "$CURRENT/DEPLOYED_COMMIT")"
 echo "current_target=$(readlink -f "$CURRENT")"
 echo "provision_result=PASS"

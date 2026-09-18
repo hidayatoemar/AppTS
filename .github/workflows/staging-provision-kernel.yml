@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   provision:
+    if: github.repository == 'hidayatoemar/AppTS' && github.ref == 'refs/heads/mcr/staging-integration-prep'
     runs-on: ubuntu-latest
     environment: staging
     timeout-minutes: 15
@@ -44,6 +45,8 @@ jobs:
           printf '%s\n' "$VERIFIED_SHA" > DEPLOYED_COMMIT
           tar -czf "$RUNNER_TEMP/appts-kernel-$VERIFIED_SHA.tar.gz" \
             DEPLOYED_COMMIT package.json README.md dist
+          sha256sum "$RUNNER_TEMP/appts-kernel-$VERIFIED_SHA.tar.gz" \
+            | tee "$RUNNER_TEMP/appts-kernel-$VERIFIED_SHA.sha256"
 
       - name: Prepare pinned SSH identity
         shell: bash
@@ -81,11 +84,13 @@ jobs:
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
             -o ConnectTimeout=12
           )
+          artifact="$RUNNER_TEMP/appts-kernel-$VERIFIED_SHA.tar.gz"
+          artifact_sha="$(sha256sum "$artifact" | awk '{print $1}')"
           scp "${SSH_OPTS[@]}" infra/staging/provision-kernel.sh \
-            "$RUNNER_TEMP/appts-kernel-$VERIFIED_SHA.tar.gz" \
+            "$artifact" \
             appts-mcr@103.127.99.11:/tmp/
           ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 \
-            "bash /tmp/provision-kernel.sh '$VERIFIED_SHA' '/tmp/appts-kernel-$VERIFIED_SHA.tar.gz'"
+            "bash /tmp/provision-kernel.sh '$VERIFIED_SHA' '/tmp/appts-kernel-$VERIFIED_SHA.tar.gz' '$artifact_sha'"
           ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 \
             "rm -f '/tmp/provision-kernel.sh' '/tmp/appts-kernel-$VERIFIED_SHA.tar.gz'"
 
@@ -102,10 +107,11 @@ jobs:
             -o ConnectTimeout=12
           )
           ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 "
-            set -e
+            set -euo pipefail
             test \"\$(cat /opt/appts-restore-service/current/DEPLOYED_COMMIT)\" = '$VERIFIED_SHA'
             test \"\$(node -p 'process.versions.node.split(\".\")[0]')\" = '22'
             test ! -e /opt/appts-restore-service/current/node_modules
-            ss -lnt
+            unexpected=\$(ss -lntH | awk '{print \$4}' | grep -Ev '(^|:)22$' || true)
+            test -z \"\$unexpected\"
             echo staging_kernel_verification=PASS
           "
