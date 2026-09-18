@@ -12,34 +12,72 @@ Project Director update on 2026-09-18: Trial #2 used two older cloud servers. Th
 - SSH port: TCP 22
 - SSH username: `appts-mcr`
 - OS: AlmaLinux 9.5 (Teal Serval) x86_64
+- Kernel observed by automated probe: `5.14.0-503.16.1.el9_5.x86_64`
+- SELinux: Enforcing
 - Dedicated SSH key identity: `appts-staging-ai` (ED25519)
-- SSH login: verified successful by AppDev
+- SSH login: verified successful by AppDev and GitHub Actions
 - Passwordless sudo for `appts-mcr`: verified successful by AppDev
 - Outbound internet/DNS from VM: verified active
-- Security Group:
+- Security Group at handover:
   - TCP 22 ACCEPT
   - all other inbound DROP
   - TCP 80/443 not yet open
-- OS listening posture at handover: only SSH TCP 22 reported listening
+- OS listening posture at automated probe: only SSH TCP 22
 - Application stack: not installed
 - Server posture: fresh empty VM
+- Root filesystem observed: ~59 GiB total, ~58 GiB available
+- Memory observed: ~3.6 GiB total, ~3.2 GiB available
+- Swap: none
+
+## Pinned SSH host identity
+
+The staging automation pins the server ED25519 host identity before SSH execution.
+
+- Public host key:
+  `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILpRJVkwh143CmmrMkQvgfNyRIbV964SsAYLZ3BlaGdh`
+- SHA256 fingerprint:
+  `SHA256:M0o8nYzf97+hK627/zeemfmiXF02eBjg7Ej5DUYITmw`
+- Reported host comment:
+  `root@appts-mcr.neo.internal`
+
+Automated workflow verification recomputes the fingerprint from the pinned public host key and requires an exact match before connecting.
+
+## Automated read-only probe
+
+GitHub Actions workflow `staging-readonly-probe` successfully connected to `appts-mcr@103.127.99.11` using:
+- GitHub Environment `staging`
+- encrypted `APPTS_STAGING_SSH_PRIVATE_KEY`
+- `StrictHostKeyChecking=yes`
+- the pinned ED25519 host identity above.
+
+Run `35330508043`, job `105553528418`: PASS.
+
+Observed runtime state:
+- Node.js: not installed
+- npm: not installed
+- Caddy/nginx/httpd: not installed
+- Docker/podman: not installed
+- `/opt/appts-restore-service`: absent
+- local port 8080: no application response
+- no mutation was performed by the probe.
 
 ## DNS status
 
-As of 2026-09-18, `staging.ts.cifo.id` still resolves to the historical Trial #2 address `103.150.226.110`.
+At AppDev handover earlier on 2026-09-18, `staging.ts.cifo.id` was reported as resolving to historical Trial #2 address `103.150.226.110`.
 
-Do **not** cut over DNS yet. The A record shall move to `103.127.99.11` only after the new staging application boundary is healthy and the web/TLS path is ready.
+During the later automated probe from the new staging VM at 2026-09-18T09:37:42Z, the same name resolved to `103.127.99.11`.
 
-## Remaining bootstrap prerequisites
+Treat the later observation as evidence that DNS propagation/cutover may already be occurring or complete from some resolvers. Do not make further DNS changes until the public resolution state is deliberately verified from multiple viewpoints.
 
-Before AI-controlled provisioning begins:
+HTTP/HTTPS remain unreachable at this stage because TCP 80/443 are not open and no web boundary is installed.
 
-1. Store the dedicated SSH private key in GitHub Environment `staging` as an encrypted secret. The key must not be sent through chat.
-2. Record/pin the new VM SSH host key fingerprint/public host key before first automated SSH connection.
-3. Run repository read-only probe `infra/staging/probe-host.sh`.
-4. Only after probe review select and execute the minimal deployment adapter.
-5. Open TCP 80/443 only when the reverse-proxy/TLS boundary is ready.
-6. Biznet lifecycle API credential is optional for initial SSH-based provisioning and may be added later for disposable-VM lifecycle automation.
+## Remaining bootstrap / deployment work
+
+1. Select and provision the minimal Node.js runtime needed for the verified AppTS kernel.
+2. Build and stage the verified code baseline without inventing a product HTTP/API contract.
+3. Keep TCP 80/443 closed until a governed executable web boundary actually exists.
+4. Add reverse-proxy/TLS only when that boundary is defined and verified.
+5. Biznet lifecycle API credential remains optional for later disposable-VM lifecycle automation.
 
 ## Trial #2 relation
 
@@ -51,7 +89,7 @@ Prior Trial #2 infrastructure values, including `103.150.226.110`, are historica
 
 Within this target, bounded staging automation may install/configure packages, create AppTS runtime files, manage AppTS services, restart those services, deploy/redeploy verified AppTS builds, collect diagnostics, and reset disposable application state as needed.
 
-This authority does not extend to production systems, customer data, other Cifo infrastructure, DNS cutover, provider-account-wide changes, or unrelated workloads unless separately authorized.
+This authority does not extend to production systems, customer data, other Cifo infrastructure, provider-account-wide changes, or unrelated workloads unless separately authorized. DNS changes remain deliberate infrastructure actions and are not to be performed implicitly.
 
 ## Security
 
