@@ -114,21 +114,23 @@ The hardened provisioning path was also re-run after the upgrade (run `353345879
 
 ## DNS status
 
-DNS is **not converged** and is held outside the automated mutation scope.
+DNS convergence has now been independently re-checked after the Network team correction.
 
-Read-only diagnostic workflow `staging-readonly-probe` run `35335355166`, job `105568811835`, completed PASS and established resolver/authority divergence without changing DNS:
+Read-only re-run of workflow `staging-readonly-probe` (run `35335355166`, attempt 2, job `105677474639`) completed PASS and observed:
 
-- GitHub-hosted runner local recursive result: `103.127.99.11`
-- Google recursive query at that instant: `103.150.226.110`
-- Cloudflare recursive query at that instant: `103.150.226.110`
-- authoritative nameservers for `cifo.id`: `ns1.cifo.co.id`, `ns2.cifo.co.id`
-- `ns1.cifo.co.id` authoritative A answer: `103.127.99.11`
-- `ns2.cifo.co.id` authoritative A answer: `103.150.226.110`
-- staging VM local resolver: `103.150.226.110`
-- Google DNS-over-HTTPS observation from the staging VM: `103.127.99.11`
-- Cloudflare DNS-over-HTTPS observation from the staging VM: `103.150.226.110`
+- GitHub-hosted runner: `103.127.99.11`
+- Google recursive resolver: `103.127.99.11`
+- authoritative `ns1.cifo.co.id`: `103.127.99.11`
+- authoritative `ns2.cifo.co.id`: `103.127.99.11`
+- staging VM local resolver: `103.127.99.11`
+- Google DNS-over-HTTPS from staging VM: `103.127.99.11`
+- Cloudflare DNS-over-HTTPS from staging VM: `103.127.99.11`
 
-This is not merely an ordinary recursive-cache observation: the two authoritative nameservers themselves disagree. Therefore the current classification is **DNS CONFIGURATION NOT CONVERGED**. No automated DNS mutation is authorized or performed. The authoritative zone must be reconciled through the separately governed DNS administration plane before DNS can be treated as current truth for staging.
+Current classification: **DNS CONVERGED** for `staging.ts.cifo.id`.
+
+The earlier authoritative divergence is retained as operational evidence. The Network team corrected the condition, but the underlying root cause and permanent synchronization/monitoring mechanism have not yet been established in AppTS evidence; therefore **root cause remains UNKNOWN** rather than inferred.
+
+No DNS mutation was performed by AppTS automation.
 
 HTTP/HTTPS remain intentionally unavailable: TCP 80/443 remain closed and no governed executable web boundary exists yet.
 
