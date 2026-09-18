@@ -29,6 +29,25 @@ jobs:
           test "${#ips[@]}" -eq 1
           test "${ips[0]}" = '103.127.99.11'
 
+      - name: Observe recursive and authoritative DNS
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v dig >/dev/null 2>&1; then
+            echo "dig_not_available=YES"
+            exit 0
+          fi
+          echo "google_recursive:"
+          dig +noall +answer @8.8.8.8 staging.ts.cifo.id A || true
+          echo "cloudflare_recursive:"
+          dig +noall +answer @1.1.1.1 staging.ts.cifo.id A || true
+          mapfile -t auth_ns < <(dig +short NS cifo.id | sed 's/\.$//' | sort -u)
+          printf 'authoritative_nameservers=%s\n' "${auth_ns[*]:-<none>}"
+          for ns in "${auth_ns[@]}"; do
+            echo "authoritative_query_ns=$ns"
+            dig +noall +answer @"$ns" staging.ts.cifo.id A || true
+          done
+
       - name: Prepare pinned SSH identity
         shell: bash
         env:
