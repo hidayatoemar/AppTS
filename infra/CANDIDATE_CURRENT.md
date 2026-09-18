@@ -1,25 +1,45 @@
 # AppTS infrastructure reference — candidate current
 
-This file preserves non-secret deployment facts from AppTS Trial #2 that may still be reusable. It is **infrastructure context only**, not Product/design authority.
+This file records the currently selected fresh staging target for AppTS. It is **infrastructure context only**, not Product/design authority.
 
-Project Director status on 2026-09-17: the server is not dormant; these facts are expected to remain current but require technical verification before deployment changes.
+Project Director update on 2026-09-18: Trial #2 used two older cloud servers. The preferred path is now a fresh staging setup rather than reusing either Trial #2 host.
 
-## Candidate-current facts
+## Candidate-current staging target
 
-- Public IPv4: `103.150.226.110`
+- Provider: Biznet Gio Nusantara — NEO Lite
+- Public IPv4: `103.127.99.11`
 - Domain: `staging.ts.cifo.id`
-- Prior host OS declaration: AlmaLinux 9 / RHEL-family Linux
-- Prior application install path: `/opt/appts-restore-service`
-- Prior public web ports: TCP 80 / 443
-- Prior local application port: 8080
-- Server posture described by Project Director: simple Linux host with Python, a web server, and small supporting utilities.
+- SSH port: TCP 22
+- SSH username: `appts-mcr`
+- Reported OS: AlmaLinux 8
+- Firewall/security-group status: fresh / not yet configured
+- Server posture: fresh empty VM; no AppTS runtime assumed installed.
 
-## Currentness / verification
+## Required pre-provision verification
 
-- Treat these values as candidate-current, **not legacy**.
-- Do not infer current DNS, TLS, process state, package versions, firewall state, or application runtime from Trial #2 files.
-- Verification attempt from the current construction environment on 2026-09-17 could not resolve `staging.ts.cifo.id` and could not connect to `103.150.226.110` on TCP 80/443. This is inconclusive because the construction environment may not have equivalent network reachability.
-- Re-verify from an authorized network/control host before deployment or DNS/firewall changes.
+Before any package install, service restart, firewall change, DNS change, TLS issuance, or AppTS deployment:
+
+1. Verify exact AlmaLinux minor version and kernel from the host.
+2. Prefer reprovisioning to AlmaLinux 9.x for a new deployment unless the Project Director explicitly accepts AlmaLinux 8.
+3. Verify SSH reachability from an authorized control host using public-key authentication.
+4. Verify the DNS A record for `staging.ts.cifo.id` points to `103.127.99.11`.
+5. Configure ingress deliberately:
+   - TCP 22 restricted to authorized admin/Cifo source networks where practical.
+   - TCP 80/443 public only when the web boundary is ready.
+6. Verify outbound HTTPS access for package/runtime installation.
+7. Run the repository read-only probe `infra/staging/probe-host.sh` before selecting the final deployment adapter.
+
+## Current external reachability observation
+
+A read-only check from the current construction environment on 2026-09-18:
+- `staging.ts.cifo.id` did not resolve from this environment.
+- TCP 22/80/443 to `103.127.99.11` did not connect from this environment.
+
+This is **not** evidence that the VM is down. The server is reported fresh and its firewall/security-group/DNS are not yet configured, and the construction environment may not have equivalent network reachability.
+
+## Trial #2 relation
+
+Prior Trial #2 infrastructure values, including `103.150.226.110`, are historical deployment context only and are not the selected staging target.
 
 ## Security
 
