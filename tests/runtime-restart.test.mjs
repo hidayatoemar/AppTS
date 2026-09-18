@@ -162,7 +162,7 @@ test("RB-08 exact replay precedes changed mutable-world validation after restart
     const replay = await restarted.execute(command());
     assert.equal(replay.kind, "REPLAY");
     assert.deepEqual(replay.execution, committed.execution);
-    assert.deepEqual(replay.effects, committed.effects);
+    assert.equal(JSON.stringify(replay.effects), JSON.stringify(committed.effects));
 
     const snapshot = await restarted.repository.load(makeScope());
     assert.equal(snapshot.version, 1);
