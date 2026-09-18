@@ -249,7 +249,7 @@ function validateResponsibility(value: unknown, scopeRef: ScopeRef): Responsibil
     effectiveTime: record.effectiveTime,
     currentness: validateCurrentness(record.currentness),
     provenance: validateProvenance(record.provenance),
-  };
+  } as unknown as ResponsibilityContext;
 }
 
 function validateActingContextCandidate(value: unknown, scopeRef: ScopeRef): ActingContextCandidate {
@@ -307,7 +307,7 @@ function validateActingContextCandidate(value: unknown, scopeRef: ScopeRef): Act
     currentness: validateCurrentness(record.currentness),
     integrity: validateIntegrity(record.integrity),
     provenance: validateProvenance(record.provenance),
-  };
+  } as unknown as ActingContextCandidate;
 }
 
 function validateScopeRef(value: unknown, requireService: boolean): ScopeRef {
