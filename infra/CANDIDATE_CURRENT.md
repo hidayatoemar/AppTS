@@ -114,11 +114,21 @@ The hardened provisioning path was also re-run after the upgrade (run `353345879
 
 ## DNS status
 
-At AppDev handover earlier on 2026-09-18, `staging.ts.cifo.id` was reported as resolving to historical Trial #2 address `103.150.226.110`.
+DNS is **not converged** and is held outside the automated mutation scope.
 
-During the later automated probe from the new staging VM at 2026-09-18T09:37:42Z, the same name resolved to `103.127.99.11`.
+Read-only diagnostic workflow `staging-readonly-probe` run `35335355166`, job `105568811835`, completed PASS and established resolver/authority divergence without changing DNS:
 
-Treat the later observation as evidence that DNS propagation/cutover may already be occurring or complete from some resolvers. Do not make further DNS changes until the public resolution state is deliberately verified from multiple viewpoints.
+- GitHub-hosted runner local recursive result: `103.127.99.11`
+- Google recursive query at that instant: `103.150.226.110`
+- Cloudflare recursive query at that instant: `103.150.226.110`
+- authoritative nameservers for `cifo.id`: `ns1.cifo.co.id`, `ns2.cifo.co.id`
+- `ns1.cifo.co.id` authoritative A answer: `103.127.99.11`
+- `ns2.cifo.co.id` authoritative A answer: `103.150.226.110`
+- staging VM local resolver: `103.150.226.110`
+- Google DNS-over-HTTPS observation from the staging VM: `103.127.99.11`
+- Cloudflare DNS-over-HTTPS observation from the staging VM: `103.150.226.110`
+
+This is not merely an ordinary recursive-cache observation: the two authoritative nameservers themselves disagree. Therefore the current classification is **DNS CONFIGURATION NOT CONVERGED**. No automated DNS mutation is authorized or performed. The authoritative zone must be reconciled through the separately governed DNS administration plane before DNS can be treated as current truth for staging.
 
 HTTP/HTTPS remain intentionally unavailable: TCP 80/443 remain closed and no governed executable web boundary exists yet.
 
