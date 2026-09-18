@@ -108,10 +108,8 @@ fi
 section "LOCAL HEALTH"
 if have curl; then
   for path in /healthz /readyz; do
-    code="$(curl -sS -o /tmp/appts-probe-body.$$ -w '%{http_code}' --max-time 5 "http://127.0.0.1:$LOCAL_PORT$path" 2>/dev/null || true)"
-    body="$(head -c 300 /tmp/appts-probe-body.$$ 2>/dev/null || true)"
-    rm -f /tmp/appts-probe-body.$$ 2>/dev/null || true
-    kv "127.0.0.1:$LOCAL_PORT$path" "HTTP=${code:-000} BODY=${body:-<none>}"
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$LOCAL_PORT$path" 2>/dev/null || true)"
+    kv "127.0.0.1:$LOCAL_PORT$path" "HTTP=${code:-000}"
   done
 else
   kv "curl" "<not-found>"
@@ -120,7 +118,7 @@ fi
 section "PUBLIC HTTP/TLS REACHABILITY"
 if have curl; then
   for scheme in http https; do
-    code="$(curl -k -sS -o /dev/null -w '%{http_code}' --max-time 8 "$scheme://$DOMAIN/" 2>/dev/null || true)"
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 "$scheme://$DOMAIN/" 2>/dev/null || true)"
     kv "$scheme://$DOMAIN/" "HTTP=${code:-000}"
   done
 fi
