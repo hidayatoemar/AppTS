@@ -22,9 +22,6 @@ Project Director update on 2026-09-18: Trial #2 used two older cloud servers. Th
   - TCP 22 ACCEPT
   - all other inbound DROP
   - TCP 80/443 not yet open
-- OS listening posture at automated probe: only SSH TCP 22
-- Application stack: not installed
-- Server posture: fresh empty VM
 - Root filesystem observed: ~59 GiB total, ~58 GiB available
 - Memory observed: ~3.6 GiB total, ~3.2 GiB available
 - Swap: none
@@ -52,7 +49,7 @@ GitHub Actions workflow `staging-readonly-probe` successfully connected to `appt
 
 Run `35330508043`, job `105553528418`: PASS.
 
-Observed runtime state:
+Pre-provision state observed:
 - Node.js: not installed
 - npm: not installed
 - Caddy/nginx/httpd: not installed
@@ -60,6 +57,30 @@ Observed runtime state:
 - `/opt/appts-restore-service`: absent
 - local port 8080: no application response
 - no mutation was performed by the probe.
+
+## Verified kernel staging deployment
+
+GitHub Actions workflow `staging-provision-kernel` deployed the exact verified RESTORE_SERVICE constructed-code baseline.
+
+- Verified product commit: `01097454cc73b9917b284c876af4c603856ebe6e`
+- Workflow run: `35331095659`
+- Job: `105555370238`
+- Result: PASS
+- Pre-deploy verification/build: 90 PASS / 0 FAIL / 0 SKIP
+- Node.js installed from AlmaLinux AppStream module stream 22:
+  `v22.23.2`
+- Installed runtime release:
+  `/opt/appts-restore-service/releases/01097454cc73b9917b284c876af4c603856ebe6e`
+- Current release symlink:
+  `/opt/appts-restore-service/current`
+- Kernel import smoke: PASS, 48 exported symbols
+- Post-provision commit identity check: PASS
+- Post-provision Node major-version check: PASS
+- No runtime `node_modules` deployed; bounded kernel runtime dependencies remain zero.
+- Listening TCP ports after deployment: only TCP 22.
+- No web/API service or product HTTP contract was invented.
+
+The AlmaLinux Node package does not install `npm` on the staging runtime host. This is acceptable for the deployed bounded kernel because compilation and tests occur in the controlled GitHub Actions build stage and the runtime artifact has zero npm dependencies.
 
 ## DNS status
 
@@ -69,14 +90,14 @@ During the later automated probe from the new staging VM at 2026-09-18T09:37:42Z
 
 Treat the later observation as evidence that DNS propagation/cutover may already be occurring or complete from some resolvers. Do not make further DNS changes until the public resolution state is deliberately verified from multiple viewpoints.
 
-HTTP/HTTPS remain unreachable at this stage because TCP 80/443 are not open and no web boundary is installed.
+HTTP/HTTPS remain intentionally unavailable: TCP 80/443 remain closed and no governed executable web boundary exists yet.
 
-## Remaining bootstrap / deployment work
+## Remaining deployment work
 
-1. Select and provision the minimal Node.js runtime needed for the verified AppTS kernel.
-2. Build and stage the verified code baseline without inventing a product HTTP/API contract.
-3. Keep TCP 80/443 closed until a governed executable web boundary actually exists.
-4. Add reverse-proxy/TLS only when that boundary is defined and verified.
+1. Define/verify the first governed executable staging boundary before introducing an HTTP/API service.
+2. Add service supervision only when there is an actual long-running AppTS process to supervise.
+3. Keep TCP 80/443 closed until that boundary is defined and verified.
+4. Add reverse-proxy/TLS only after the executable boundary is ready.
 5. Biznet lifecycle API credential remains optional for later disposable-VM lifecycle automation.
 
 ## Trial #2 relation
