@@ -13,11 +13,21 @@ permissions:
 
 jobs:
   probe:
+    if: github.repository == 'hidayatoemar/AppTS' && github.ref == 'refs/heads/mcr/staging-integration-prep'
     runs-on: ubuntu-latest
     environment: staging
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify public DNS from runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ips < <(getent ahostsv4 staging.ts.cifo.id | awk '{print $1}' | sort -u)
+          printf 'runner_dns_ipv4=%s\n' "${ips[*]:-<none>}"
+          test "${#ips[@]}" -eq 1
+          test "${ips[0]}" = '103.127.99.11'
 
       - name: Prepare pinned SSH identity
         shell: bash

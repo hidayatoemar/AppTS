@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   acceptance:
+    if: github.repository == 'hidayatoemar/AppTS' && github.ref == 'refs/heads/mcr/staging-integration-prep'
     runs-on: ubuntu-latest
     environment: staging
     timeout-minutes: 10

@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   baseline:
+    if: github.repository == 'hidayatoemar/AppTS' && github.ref == 'refs/heads/mcr/staging-integration-prep'
     runs-on: ubuntu-latest
     environment: staging
     timeout-minutes: 20
@@ -33,7 +34,7 @@ jobs:
           EOF
           chmod 600 "$HOME/.ssh/known_hosts"
 
-      - name: Upgrade AlmaLinux 9 baseline
+      - name: Upgrade AlmaLinux 9 packages
         shell: bash
         run: |
           set -euo pipefail
@@ -45,22 +46,47 @@ jobs:
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
             -o ConnectTimeout=12
           )
-          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 "
+          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 '
             set -euo pipefail
-            echo before_os=\$(grep '^PRETTY_NAME=' /etc/os-release)
-            echo before_kernel=\$(uname -r)
+            echo before_os="$(grep "^PRETTY_NAME=" /etc/os-release)"
+            echo before_kernel="$(uname -r)"
             sudo dnf -y upgrade --refresh
-            latest_kernel=\$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel | sort -V | tail -1)
-            running_kernel=\$(uname -r)
-            echo latest_kernel=\$latest_kernel
-            echo running_kernel=\$running_kernel
-            if [ \"\$latest_kernel\" != \"\$running_kernel\" ]; then
+          '
+
+      - name: Reboot only when installed kernel is newer
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSH_OPTS=(
+            -i "$HOME/.ssh/appts_staging"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+            -o ConnectTimeout=12
+          )
+          set +e
+          output="$(ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 '
+            set -euo pipefail
+            latest_kernel="$(rpm -q --qf "%{VERSION}-%{RELEASE}.%{ARCH}\n" kernel | sort -V | tail -1)"
+            running_kernel="$(uname -r)"
+            echo latest_kernel="$latest_kernel"
+            echo running_kernel="$running_kernel"
+            if [ "$latest_kernel" != "$running_kernel" ]; then
               echo reboot_required=YES
               sudo systemctl reboot
             else
               echo reboot_required=NO
             fi
-          " || true
+          ' 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          if grep -q '^reboot_required=YES$' <<<"$output"; then
+            echo "SSH disconnect during requested reboot is expected"
+          else
+            test "$status" -eq 0
+          fi
 
       - name: Wait for pinned SSH after possible reboot
         shell: bash
@@ -98,11 +124,18 @@ jobs:
           )
           ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 "
             set -euo pipefail
-            grep -E '^(PRETTY_NAME|VERSION_ID)=' /etc/os-release
-            echo kernel=\$(uname -r)
-            echo node=\$(node --version)
+            source /etc/os-release
+            test \"\${VERSION_ID%%.*}\" = '9'
+            latest_kernel=\$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\\n' kernel | sort -V | tail -1)
+            test \"\$(uname -r)\" = \"\$latest_kernel\"
+            test \"\$(getenforce)\" = 'Enforcing'
+            test \"\$(node -p 'process.versions.node.split(\".\")[0]')\" = '22'
             test \"\$(cat /opt/appts-restore-service/current/DEPLOYED_COMMIT)\" = '$VERIFIED_SHA'
             node --input-type=module -e \"const m=await import('file:///opt/appts-restore-service/current/dist/src/index.js'); if(!m||Object.keys(m).length===0) process.exit(1); console.log('kernel_import_after_os_upgrade=PASS exports='+Object.keys(m).length)\"
-            ss -lnt
+            unexpected=\$(ss -lntH | awk '{print \$4}' | grep -Ev '(^|:)22$' || true)
+            test -z \"\$unexpected\"
+            echo os_version=\$VERSION_ID
+            echo kernel=\$(uname -r)
+            echo node=\$(node --version)
             echo staging_os_baseline=PASS
           "

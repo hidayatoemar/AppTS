@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   check:
+    if: github.repository == 'hidayatoemar/AppTS' && github.ref == 'refs/heads/mcr/staging-integration-prep'
     runs-on: ubuntu-latest
     environment: staging
     steps:

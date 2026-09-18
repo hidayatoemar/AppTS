@@ -11,8 +11,8 @@ Project Director update on 2026-09-18: Trial #2 used two older cloud servers. Th
 - Domain: `staging.ts.cifo.id`
 - SSH port: TCP 22
 - SSH username: `appts-mcr`
-- OS: AlmaLinux 9.5 (Teal Serval) x86_64
-- Kernel observed by automated probe: `5.14.0-503.16.1.el9_5.x86_64`
+- OS: AlmaLinux 9.8 (Olive Jaguar) x86_64 (upgraded in-place from 9.5 on 2026-09-18)
+- Current kernel after governed OS baseline upgrade/reboot: `5.14.0-687.48.1.el9_8.x86_64`
 - SELinux: Enforcing
 - Dedicated SSH key identity: `appts-staging-ai` (ED25519)
 - SSH login: verified successful by AppDev and GitHub Actions
@@ -96,6 +96,22 @@ GitHub Actions workflow `staging-native-acceptance` rebuilt the exact verified b
 
 This establishes that the verified kernel is not only buildable in GitHub Actions but executable with the same verified behavior on the target staging OS/runtime.
 
+
+### Post-upgrade continuity and idempotence
+
+The governed OS baseline workflow upgraded the fresh VM from AlmaLinux 9.5 to AlmaLinux 9.8, installed kernel `5.14.0-687.48.1.el9_8.x86_64`, rebooted, re-established pinned SSH, and verified the deployed kernel continuity.
+
+- OS workflow run: `35332021637`, job `105558286116`: PASS
+- Post-reboot OS: AlmaLinux 9.8 (Olive Jaguar)
+- Post-reboot kernel: `5.14.0-687.48.1.el9_8.x86_64`
+- Node.js: `v22.23.2`
+- Kernel import after OS upgrade: PASS, 48 exports
+- Listening TCP ports after reboot: only TCP 22
+
+The native staging acceptance was then re-run against the upgraded host (run `35331891729`, attempt 2, job `105565709465`) and again produced **90 PASS / 0 FAIL / 0 SKIP**.
+
+The hardened provisioning path was also re-run after the upgrade (run `35334587950`, job `105566378636`) and returned `release_state=ALREADY_PRESENT`, proving the same verified release can be reconciled idempotently without duplicating the release. The transferred build artifact was SHA-256 verified before use; that run observed `aa56a2eb487e054afef85f47ec1329c2ad5b1bf1a510365b996a2c610ad551d1`.
+
 ## DNS status
 
 At AppDev handover earlier on 2026-09-18, `staging.ts.cifo.id` was reported as resolving to historical Trial #2 address `103.150.226.110`.
@@ -127,5 +143,9 @@ Within this target, bounded staging automation may install/configure packages, c
 This authority does not extend to production systems, customer data, other Cifo infrastructure, provider-account-wide changes, or unrelated workloads unless separately authorized. DNS changes remain deliberate infrastructure actions and are not to be performed implicitly.
 
 ## Security
+
+Repository visibility is intentionally **public** by Project Director decision. Source code and non-secret infrastructure metadata are therefore public. The SSH private key remains only in GitHub Environment `staging`; workflows use the pinned host key and exact branch/repository guards before environment-bound execution.
+
+As observed through the GitHub branch API on 2026-09-18, `mcr/staging-integration-prep` is currently not branch-protected. Public visibility alone does not grant write access, but branch/environment protection remains a separate GitHub administration-plane hardening item.
 
 No passwords, private keys, vault values, tokens, or other credentials are retained in this repository file.
