@@ -100,9 +100,35 @@ fi
 
 section "DNS"
 if have getent; then
-  safe_run "domain_ipv4" getent ahostsv4 "$DOMAIN"
+  safe_run "domain_ipv4_local_resolver" getent ahostsv4 "$DOMAIN"
 else
   kv "getent" "<not-found>"
+fi
+
+if have python3; then
+  APPTS_PROBE_DOMAIN="$DOMAIN" python3 - <<'PY' || true
+import json
+import os
+import urllib.parse
+import urllib.request
+
+domain = os.environ["APPTS_PROBE_DOMAIN"]
+providers = [
+    ("google_doh_ipv4", "https://dns.google/resolve?" + urllib.parse.urlencode({"name": domain, "type": "A"}), {}),
+    ("cloudflare_doh_ipv4", "https://cloudflare-dns.com/dns-query?" + urllib.parse.urlencode({"name": domain, "type": "A"}), {"Accept": "application/dns-json"}),
+]
+for label, url, headers in providers:
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            doc = json.load(resp)
+        answers = sorted({a.get("data") for a in doc.get("Answer", []) if a.get("type") == 1 and a.get("data")})
+        print(f"{label:28} {' '.join(answers) if answers else '<no-A-answer>'}")
+    except Exception:
+        print(f"{label:28} <unavailable-or-failed>")
+PY
+else
+  kv "dns_over_https" "<python3-not-found>"
 fi
 
 section "LOCAL HEALTH"
