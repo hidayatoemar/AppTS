@@ -82,6 +82,20 @@ GitHub Actions workflow `staging-provision-kernel` deployed the exact verified R
 
 The AlmaLinux Node package does not install `npm` on the staging runtime host. This is acceptable for the deployed bounded kernel because compilation and tests occur in the controlled GitHub Actions build stage and the runtime artifact has zero npm dependencies.
 
+## Native staging acceptance
+
+GitHub Actions workflow `staging-native-acceptance` rebuilt the exact verified baseline and executed the full RESTORE_SERVICE executable test surface **on the staging host itself** using the installed Node.js 22 runtime.
+
+- Workflow run: `35331891729`
+- Job: `105557879029`
+- Result: PASS
+- Exact deployed commit identity: PASS
+- Host Node major version 22: PASS
+- Full executable verification on staging host: 90 PASS / 0 FAIL / 0 SKIP
+- No unexpected TCP listener introduced; staging remained SSH-only.
+
+This establishes that the verified kernel is not only buildable in GitHub Actions but executable with the same verified behavior on the target staging OS/runtime.
+
 ## DNS status
 
 At AppDev handover earlier on 2026-09-18, `staging.ts.cifo.id` was reported as resolving to historical Trial #2 address `103.150.226.110`.
