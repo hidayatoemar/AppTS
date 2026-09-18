@@ -1,0 +1,60 @@
+name: staging-readonly-probe
+
+on:
+  push:
+    branches: [mcr/staging-integration-prep]
+    paths:
+      - '.github/workflows/staging-readonly-probe.yml'
+      - 'infra/staging/probe-host.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare pinned SSH identity
+        shell: bash
+        env:
+          APPTS_STAGING_SSH_PRIVATE_KEY: ${{ secrets.APPTS_STAGING_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "${APPTS_STAGING_SSH_PRIVATE_KEY:-}"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$APPTS_STAGING_SSH_PRIVATE_KEY" > "$HOME/.ssh/appts_staging"
+          chmod 600 "$HOME/.ssh/appts_staging"
+          cat > "$HOME/.ssh/known_hosts" <<'EOF'
+          103.127.99.11 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILpRJVkwh143CmmrMkQvgfNyRIbV964SsAYLZ3BlaGdh
+          EOF
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Verify pinned host fingerprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILpRJVkwh143CmmrMkQvgfNyRIbV964SsAYLZ3BlaGdh' > /tmp/appts-hostkey.pub
+          actual="$(ssh-keygen -lf /tmp/appts-hostkey.pub -E sha256 | awk '{print $2}')"
+          expected='SHA256:M0o8nYzf97+hK627/zeemfmiXF02eBjg7Ej5DUYITmw'
+          test "$actual" = "$expected"
+          echo "Pinned host fingerprint verified: $actual"
+
+      - name: Run read-only staging probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh \
+            -i "$HOME/.ssh/appts_staging" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -o ConnectTimeout=12 \
+            appts-mcr@103.127.99.11 \
+            'APPTS_STAGING_DOMAIN=staging.ts.cifo.id APPTS_STAGING_EXPECTED_IP=103.127.99.11 bash -s' \
+            < infra/staging/probe-host.sh
