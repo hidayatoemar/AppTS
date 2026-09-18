@@ -1,0 +1,38 @@
+name: staging-bootstrap-check
+
+on:
+  push:
+    branches: [mcr/staging-integration-prep]
+    paths:
+      - '.github/workflows/staging-bootstrap-check.yml'
+      - 'infra/staging/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate staging SSH secret
+        shell: bash
+        env:
+          APPTS_STAGING_SSH_PRIVATE_KEY: ${{ secrets.APPTS_STAGING_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APPTS_STAGING_SSH_PRIVATE_KEY:-}" ]; then
+            echo "staging SSH private key secret is missing or empty"
+            exit 1
+          fi
+          umask 077
+          keyfile="$(mktemp)"
+          trap 'rm -f "$keyfile"' EXIT
+          printf '%s\n' "$APPTS_STAGING_SSH_PRIVATE_KEY" > "$keyfile"
+          if ! ssh-keygen -y -f "$keyfile" >/dev/null 2>&1; then
+            echo "staging SSH private key secret is present but not usable as an unencrypted OpenSSH private key"
+            exit 1
+          fi
+          echo "staging SSH private key secret is present and structurally valid"
