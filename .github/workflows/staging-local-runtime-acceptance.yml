@@ -1,0 +1,301 @@
+name: staging-local-runtime-acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/staging/**'
+      - 'tests/runtime-boundary.test.mjs'
+      - 'tests/runtime-restart.test.mjs'
+      - 'infra/staging/appts-restore-service-local.service'
+      - 'infra/staging/provision-local-runtime.sh'
+      - 'infra/staging/runtime.env.example'
+      - 'infra/staging/synthetic-trial-fixture.example.json'
+      - '.github/workflows/staging-local-runtime-acceptance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRODUCT_SHA: 01097454cc73b9917b284c876af4c603856ebe6e
+  ADMITTED_MAIN_SHA: fc05398bb1e003a104cb644d6d4879f64b613be9
+
+jobs:
+  gate-product:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PRODUCT_SHA }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Gate A exact Product semantic baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRODUCT_SHA"
+          npm install --no-save --ignore-scripts --no-audit --no-fund typescript@5.8.3
+          npm run build
+          node --test tests/*.test.mjs tests/vectors/*.test.mjs | tee /tmp/gate-a.tap
+          grep -Fx '# tests 90' /tmp/gate-a.tap
+          grep -Fx '# pass 90' /tmp/gate-a.tap
+          grep -Fx '# fail 0' /tmp/gate-a.tap
+          grep -Fx '# skipped 0' /tmp/gate-a.tap
+
+  gate-admitted-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.ADMITTED_MAIN_SHA }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Gate B exact admitted-main baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ADMITTED_MAIN_SHA"
+          npm install --no-save --ignore-scripts --no-audit --no-fund typescript@5.8.3
+          npm run build
+          node --test tests/*.test.mjs tests/vectors/*.test.mjs | tee /tmp/gate-b.tap
+          grep -Fx '# tests 92' /tmp/gate-b.tap
+          grep -Fx '# pass 92' /tmp/gate-b.tap
+          grep -Fx '# fail 0' /tmp/gate-b.tap
+          grep -Fx '# skipped 0' /tmp/gate-b.tap
+
+  gate-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact bounded diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e "$ADMITTED_MAIN_SHA^{commit}"
+          git cat-file -e "$PRODUCT_SHA^{commit}"
+          cat > /tmp/expected-files <<'EOF'
+          .github/workflows/staging-local-runtime-acceptance.yml
+          infra/staging/appts-restore-service-local.service
+          infra/staging/provision-local-runtime.sh
+          infra/staging/runtime.env.example
+          infra/staging/synthetic-trial-fixture.example.json
+          src/staging/local-boundary.ts
+          src/staging/main.ts
+          src/staging/node-builtins.d.ts
+          src/staging/runtime-composition.ts
+          src/staging/runtime-config.ts
+          tests/runtime-boundary.test.mjs
+          tests/runtime-restart.test.mjs
+          EOF
+          git diff --name-only "$ADMITTED_MAIN_SHA"..HEAD | sort > /tmp/actual-files
+          diff -u /tmp/expected-files /tmp/actual-files
+          git diff --quiet "$PRODUCT_SHA"..HEAD --             src/contracts src/runtime src/persistence src/adapters src/config src/simulator tests/vectors
+      - name: Strict TypeScript compile and Gate C candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save --ignore-scripts --no-audit --no-fund typescript@5.8.3
+          test ! -d node_modules/@types/node
+          npm run build
+          node --test tests/*.test.mjs tests/vectors/*.test.mjs | tee /tmp/gate-c.tap
+          grep -Fx '# tests 107' /tmp/gate-c.tap
+          grep -Fx '# pass 107' /tmp/gate-c.tap
+          grep -Fx '# fail 0' /tmp/gate-c.tap
+          grep -Fx '# skipped 0' /tmp/gate-c.tap
+          for id in $(seq -w 1 15); do
+            grep -q "RB-$id" tests/runtime-boundary.test.mjs tests/runtime-restart.test.mjs
+          done
+
+  deploy-staging:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'hidayatoemar/AppTS' && github.ref == 'refs/heads/mcr/staging-loopback-runtime'
+    needs: [gate-product, gate-admitted-main, gate-candidate]
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 20
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Checkout Gate A source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PRODUCT_SHA }}
+          path: gate-a
+      - name: Checkout Gate B source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.ADMITTED_MAIN_SHA }}
+          path: gate-b
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build target-host acceptance artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          CANDIDATE_SHA="$(git rev-parse HEAD)"
+          for dir in gate-a gate-b .; do
+            (
+              cd "$dir"
+              npm install --no-save --ignore-scripts --no-audit --no-fund typescript@5.8.3
+              npm run build
+            )
+          done
+          tar -czf "$RUNNER_TEMP/gate-a.tar.gz" -C gate-a dist tests
+          tar -czf "$RUNNER_TEMP/gate-b.tar.gz" -C gate-b dist tests
+          printf '%s\n' "$CANDIDATE_SHA" > DEPLOYED_COMMIT
+          tar -czf "$RUNNER_TEMP/local-runtime-$CANDIDATE_SHA.tar.gz"             DEPLOYED_COMMIT package.json README.md dist tests infra/staging
+          sha256sum "$RUNNER_TEMP/local-runtime-$CANDIDATE_SHA.tar.gz"             | tee "$RUNNER_TEMP/local-runtime-$CANDIDATE_SHA.sha256"
+      - name: Prepare pinned SSH identity
+        shell: bash
+        env:
+          APPTS_STAGING_SSH_PRIVATE_KEY: ${{ secrets.APPTS_STAGING_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "${APPTS_STAGING_SSH_PRIVATE_KEY:-}"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$APPTS_STAGING_SSH_PRIVATE_KEY" > "$HOME/.ssh/appts_staging"
+          chmod 600 "$HOME/.ssh/appts_staging"
+          cat > "$HOME/.ssh/known_hosts" <<'EOF'
+          103.127.99.11 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILpRJVkwh143CmmrMkQvgfNyRIbV964SsAYLZ3BlaGdh
+          EOF
+          chmod 600 "$HOME/.ssh/known_hosts"
+          printf '%s\n' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILpRJVkwh143CmmrMkQvgfNyRIbV964SsAYLZ3BlaGdh' > /tmp/appts-hostkey.pub
+          actual="$(ssh-keygen -lf /tmp/appts-hostkey.pub -E sha256 | awk '{print $2}')"
+          test "$actual" = 'SHA256:M0o8nYzf97+hK627/zeemfmiXF02eBjg7Ej5DUYITmw'
+      - name: Prepare bounded target-host acceptance script
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/staging-acceptance.mjs" <<'NODE'
+          import { execFileSync } from "node:child_process";
+
+          const base = "http://127.0.0.1:8080";
+          const marker = "PAYLOAD-DO-NOT-LOG-LOCAL-TRIAL";
+          const command = {
+            commandId: "CMD-STAGING-001",
+            actionId: "RS-A-022",
+            purposeRef: {
+              purpose: "RESTORE_SERVICE",
+              situationId: "SIT-STAGING-001",
+              compositionInstanceId: "COMP-STAGING-001",
+              startedFromBasisRef: "EV-INTAKE-STAGING"
+            },
+            scopeRef: {
+              situationId: "SIT-STAGING-001",
+              subjectType: "SERVICE",
+              subjectId: "SVC-STAGING-001"
+            },
+            requestedByActorOrMachineRef: "PERSON-STAGING-001",
+            actingContextRef: "CTX-STAGING-001",
+            expectedInputVersion: 0,
+            requestTime: "2026-09-19T00:00:00.000Z",
+            payloadRef: marker,
+            evidenceRefs: ["EV-DIAGNOSIS-STAGING"]
+          };
+
+          async function waitReady() {
+            for (let n = 0; n < 30; n += 1) {
+              try {
+                const response = await fetch(base + "/readyz");
+                if (response.ok) return;
+              } catch {}
+              await new Promise((resolve) => setTimeout(resolve, 500));
+            }
+            throw new Error("ready timeout");
+          }
+
+          async function post(value) {
+            const response = await fetch(base + "/commands", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(value)
+            });
+            return { status: response.status, body: await response.json() };
+          }
+
+          await waitReady();
+          const committed = await post(command);
+          if (committed.status !== 200 || committed.body.kind !== "COMMITTED") throw new Error("commit failed");
+
+          const replay = await post(command);
+          if (replay.status !== 200 || replay.body.kind !== "REPLAY") throw new Error("replay failed");
+          if (JSON.stringify(replay.body.execution) !== JSON.stringify(committed.body.execution)) throw new Error("execution replay mismatch");
+          if (JSON.stringify(replay.body.effects) !== JSON.stringify(committed.body.effects)) throw new Error("effect replay mismatch");
+
+          const conflict = await post({ ...command, expectedInputVersion: 1 });
+          if (conflict.status !== 409 || conflict.body.error !== "IMPLEMENTATION_REPLAY_CONFLICT") throw new Error("conflict failed");
+
+          execFileSync("sudo", ["systemctl", "restart", "appts-restore-service-local.service"], { stdio: "inherit" });
+          await waitReady();
+
+          const postRestartReplay = await post(command);
+          if (postRestartReplay.status !== 200 || postRestartReplay.body.kind !== "REPLAY") throw new Error("post-restart replay failed");
+          if (JSON.stringify(postRestartReplay.body.execution) !== JSON.stringify(committed.body.execution)) throw new Error("post-restart execution mismatch");
+          if (JSON.stringify(postRestartReplay.body.effects) !== JSON.stringify(committed.body.effects)) throw new Error("post-restart effect mismatch");
+
+          console.log("staging_local_runtime_command_restart_replay=PASS");
+          NODE
+      - name: Transfer, provision, and execute bounded acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          CANDIDATE_SHA="$(git rev-parse HEAD)"
+          artifact="$RUNNER_TEMP/local-runtime-$CANDIDATE_SHA.tar.gz"
+          artifact_sha="$(sha256sum "$artifact" | awk '{print $1}')"
+          SSH_OPTS=(
+            -i "$HOME/.ssh/appts_staging"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+            -o ConnectTimeout=12
+          )
+          scp "${SSH_OPTS[@]}"             infra/staging/provision-local-runtime.sh             "$artifact"             "$RUNNER_TEMP/gate-a.tar.gz"             "$RUNNER_TEMP/gate-b.tar.gz"             "$RUNNER_TEMP/staging-acceptance.mjs"             appts-mcr@103.127.99.11:/tmp/
+          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11             "bash /tmp/provision-local-runtime.sh '$CANDIDATE_SHA' '/tmp/local-runtime-$CANDIDATE_SHA.tar.gz' '$artifact_sha'"
+          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 "
+            set -euo pipefail
+            test "${D}(node -p 'process.versions.node.split(".")[0]')" = '22'
+            worka=${D}(mktemp -d)
+            workb=${D}(mktemp -d)
+            trap 'rm -rf "${D}worka" "${D}workb"' EXIT
+            tar -xzf /tmp/gate-a.tar.gz -C "${D}worka"
+            tar -xzf /tmp/gate-b.tar.gz -C "${D}workb"
+            node --test "${D}worka"/tests/*.test.mjs "${D}worka"/tests/vectors/*.test.mjs | tee /tmp/target-gate-a.tap
+            grep -Fx '# tests 90' /tmp/target-gate-a.tap
+            grep -Fx '# pass 90' /tmp/target-gate-a.tap
+            grep -Fx '# fail 0' /tmp/target-gate-a.tap
+            grep -Fx '# skipped 0' /tmp/target-gate-a.tap
+            node --test "${D}workb"/tests/*.test.mjs "${D}workb"/tests/vectors/*.test.mjs | tee /tmp/target-gate-b.tap
+            grep -Fx '# tests 92' /tmp/target-gate-b.tap
+            grep -Fx '# pass 92' /tmp/target-gate-b.tap
+            grep -Fx '# fail 0' /tmp/target-gate-b.tap
+            grep -Fx '# skipped 0' /tmp/target-gate-b.tap
+            cd /opt/appts-restore-service/current
+            node --test tests/*.test.mjs tests/vectors/*.test.mjs | tee /tmp/target-gate-c.tap
+            grep -Fx '# tests 107' /tmp/target-gate-c.tap
+            grep -Fx '# pass 107' /tmp/target-gate-c.tap
+            grep -Fx '# fail 0' /tmp/target-gate-c.tap
+            grep -Fx '# skipped 0' /tmp/target-gate-c.tap
+            node /tmp/staging-acceptance.mjs
+            app_listener=${D}(ss -lntH | awk '{print ${D}4}' | grep -E '(^|])?:8080$' || true)
+            test "${D}app_listener" = '127.0.0.1:8080'
+            test -z "${D}(ss -lntH | awk '{print ${D}4}' | grep -E '(^|:)(80|443)$' || true)"
+            ! sudo journalctl -u appts-restore-service-local.service --no-pager | grep -F 'PAYLOAD-DO-NOT-LOG-LOCAL-TRIAL'
+            ! sudo journalctl -u appts-restore-service-local.service --no-pager | grep -F 'EV-DIAGNOSIS-STAGING'
+            echo target_host_three_gate_acceptance=PASS
+          "
+          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11             "rm -f /tmp/provision-local-runtime.sh /tmp/local-runtime-$CANDIDATE_SHA.tar.gz /tmp/gate-a.tar.gz /tmp/gate-b.tar.gz /tmp/staging-acceptance.mjs /tmp/target-gate-a.tap /tmp/target-gate-b.tap /tmp/target-gate-c.tap"

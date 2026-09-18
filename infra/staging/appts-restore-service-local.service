@@ -1,0 +1,29 @@
+[Unit]
+Description=AppTS RESTORE_SERVICE local-only staging runtime
+After=local-fs.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=appts-runtime
+Group=appts-runtime
+WorkingDirectory=/opt/appts-restore-service/current
+Environment=APPTS_RUNTIME_CONFIG=/etc/appts-restore-service/runtime.json
+ExecStart=/usr/bin/node /opt/appts-restore-service/current/dist/src/staging/main.js
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=15s
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/appts-restore-service/runtime
+ReadOnlyPaths=/opt/appts-restore-service /etc/appts-restore-service
+UMask=0027
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
