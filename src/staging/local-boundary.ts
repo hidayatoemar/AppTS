@@ -10,7 +10,7 @@ import type { CommandPipelineResult } from "../runtime/command-pipeline.js";
 import { RS_A_022 } from "../runtime/rs-a-022-binding.js";
 import { LOOPBACK_ADDRESS } from "./runtime-config.js";
 
-const MAX_BODY_CHARS = 64 * 1024;
+const MAX_BODY_BYTES = 64 * 1024;
 
 export interface InfrastructureLogger {
   log(event: string, fields?: Readonly<Record<string, string | number | boolean>>): void;
@@ -112,7 +112,7 @@ async function handleRequest(
 
   const rawContentType = request.headers["content-type"];
   const contentType = Array.isArray(rawContentType) ? rawContentType[0] : rawContentType;
-  if (!contentType || !contentType.toLowerCase().startsWith("application/json")) {
+  if (!contentType || !isAcceptedJsonContentType(contentType)) {
     writeJson(response, 400, { error: "APPLICATION_JSON_REQUIRED" });
     logger.log("transport_outcome", { method, path, status: 400 });
     return;
@@ -152,20 +152,27 @@ async function handleRequest(
   }
 }
 
+function isAcceptedJsonContentType(contentType: string): boolean {
+  return /^application\/json(?:\s*;\s*charset\s*=\s*(?:"utf-8"|utf-8))?$/i.test(contentType.trim());
+}
+
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   return new Promise<unknown>((resolve, reject) => {
     let body = "";
+    let bodyBytes = 0;
     let settled = false;
+    const encoder = new TextEncoder();
     request.setEncoding("utf8");
 
     request.on("data", (chunk) => {
       if (settled) return;
-      body += chunk;
-      if (body.length > MAX_BODY_CHARS) {
+      bodyBytes += encoder.encode(chunk).byteLength;
+      if (bodyBytes > MAX_BODY_BYTES) {
         settled = true;
         reject(new TransportInputError("BODY_TOO_LARGE", 413));
-        request.destroy();
+        return;
       }
+      body += chunk;
     });
 
     request.on("end", () => {
