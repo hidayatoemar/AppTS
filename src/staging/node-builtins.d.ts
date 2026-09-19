@@ -46,3 +46,9 @@ declare module "node:process" {
   };
   export default process;
 }
+
+
+declare module "node:path" {
+  export function isAbsolute(path: string): boolean;
+  export function resolve(...paths: string[]): string;
+}
