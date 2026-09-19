@@ -266,36 +266,36 @@ jobs:
           )
           scp "${SSH_OPTS[@]}"             infra/staging/provision-local-runtime.sh             "$artifact"             "$RUNNER_TEMP/gate-a.tar.gz"             "$RUNNER_TEMP/gate-b.tar.gz"             "$RUNNER_TEMP/staging-acceptance.mjs"             appts-mcr@103.127.99.11:/tmp/
           ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11             "bash /tmp/provision-local-runtime.sh '$CANDIDATE_SHA' '/tmp/local-runtime-$CANDIDATE_SHA.tar.gz' '$artifact_sha'"
-          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 "
-            set -euo pipefail
-            test "${D}(node -p 'process.versions.node.split(".")[0]')" = '22'
-            worka=${D}(mktemp -d)
-            workb=${D}(mktemp -d)
-            trap 'rm -rf "${D}worka" "${D}workb"' EXIT
-            tar -xzf /tmp/gate-a.tar.gz -C "${D}worka"
-            tar -xzf /tmp/gate-b.tar.gz -C "${D}workb"
-            node --test "${D}worka"/tests/*.test.mjs "${D}worka"/tests/vectors/*.test.mjs | tee /tmp/target-gate-a.tap
-            grep -Fx '# tests 90' /tmp/target-gate-a.tap
-            grep -Fx '# pass 90' /tmp/target-gate-a.tap
-            grep -Fx '# fail 0' /tmp/target-gate-a.tap
-            grep -Fx '# skipped 0' /tmp/target-gate-a.tap
-            node --test "${D}workb"/tests/*.test.mjs "${D}workb"/tests/vectors/*.test.mjs | tee /tmp/target-gate-b.tap
-            grep -Fx '# tests 92' /tmp/target-gate-b.tap
-            grep -Fx '# pass 92' /tmp/target-gate-b.tap
-            grep -Fx '# fail 0' /tmp/target-gate-b.tap
-            grep -Fx '# skipped 0' /tmp/target-gate-b.tap
-            cd /opt/appts-restore-service/current
-            node --test tests/*.test.mjs tests/vectors/*.test.mjs | tee /tmp/target-gate-c.tap
-            grep -Fx '# tests 107' /tmp/target-gate-c.tap
-            grep -Fx '# pass 107' /tmp/target-gate-c.tap
-            grep -Fx '# fail 0' /tmp/target-gate-c.tap
-            grep -Fx '# skipped 0' /tmp/target-gate-c.tap
-            node /tmp/staging-acceptance.mjs
-            app_listener=${D}(ss -lntH | awk '{print ${D}4}' | grep -E '(^|])?:8080$' || true)
-            test "${D}app_listener" = '127.0.0.1:8080'
-            test -z "${D}(ss -lntH | awk '{print ${D}4}' | grep -E '(^|:)(80|443)$' || true)"
-            ! sudo journalctl -u appts-restore-service-local.service --no-pager | grep -F 'PAYLOAD-DO-NOT-LOG-LOCAL-TRIAL'
-            ! sudo journalctl -u appts-restore-service-local.service --no-pager | grep -F 'EV-DIAGNOSIS-STAGING'
-            echo target_host_three_gate_acceptance=PASS
-          "
+          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 'bash -s' <<'REMOTE_ACCEPTANCE'
+          set -euo pipefail
+          test "$(node -p 'process.versions.node.split(".")[0]')" = '22'
+          worka=$(mktemp -d)
+          workb=$(mktemp -d)
+          trap 'rm -rf "$worka" "$workb"' EXIT
+          tar -xzf /tmp/gate-a.tar.gz -C "$worka"
+          tar -xzf /tmp/gate-b.tar.gz -C "$workb"
+          node --test "$worka"/tests/*.test.mjs "$worka"/tests/vectors/*.test.mjs | tee /tmp/target-gate-a.tap
+          grep -Fx '# tests 90' /tmp/target-gate-a.tap
+          grep -Fx '# pass 90' /tmp/target-gate-a.tap
+          grep -Fx '# fail 0' /tmp/target-gate-a.tap
+          grep -Fx '# skipped 0' /tmp/target-gate-a.tap
+          node --test "$workb"/tests/*.test.mjs "$workb"/tests/vectors/*.test.mjs | tee /tmp/target-gate-b.tap
+          grep -Fx '# tests 92' /tmp/target-gate-b.tap
+          grep -Fx '# pass 92' /tmp/target-gate-b.tap
+          grep -Fx '# fail 0' /tmp/target-gate-b.tap
+          grep -Fx '# skipped 0' /tmp/target-gate-b.tap
+          cd /opt/appts-restore-service/current
+          node --test tests/*.test.mjs tests/vectors/*.test.mjs | tee /tmp/target-gate-c.tap
+          grep -Fx '# tests 107' /tmp/target-gate-c.tap
+          grep -Fx '# pass 107' /tmp/target-gate-c.tap
+          grep -Fx '# fail 0' /tmp/target-gate-c.tap
+          grep -Fx '# skipped 0' /tmp/target-gate-c.tap
+          node /tmp/staging-acceptance.mjs
+          app_listener=$(ss -lntH | awk '{print $4}' | grep -E '(^|])?:8080$' || true)
+          test "$app_listener" = '127.0.0.1:8080'
+          test -z "$(ss -lntH | awk '{print $4}' | grep -E '(^|:)(80|443)$' || true)"
+          ! sudo journalctl -u appts-restore-service-local.service --no-pager | grep -F 'PAYLOAD-DO-NOT-LOG-LOCAL-TRIAL'
+          ! sudo journalctl -u appts-restore-service-local.service --no-pager | grep -F 'EV-DIAGNOSIS-STAGING'
+          echo target_host_three_gate_acceptance=PASS
+          REMOTE_ACCEPTANCE
           ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11             "rm -f /tmp/provision-local-runtime.sh /tmp/local-runtime-$CANDIDATE_SHA.tar.gz /tmp/gate-a.tar.gz /tmp/gate-b.tar.gz /tmp/staging-acceptance.mjs /tmp/target-gate-a.tap /tmp/target-gate-b.tap /tmp/target-gate-c.tap"
