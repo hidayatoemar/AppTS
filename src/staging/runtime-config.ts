@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { isAbsolute, resolve } from "node:path";
 import type {
   ActingContextCandidate,
   Currentness,
@@ -376,7 +377,10 @@ function validateProvenance(value: unknown): Provenance {
 }
 
 function isWithinRuntimeRoot(path: string): boolean {
-  return path === RUNTIME_DATA_ROOT || path.startsWith(`${RUNTIME_DATA_ROOT}/`);
+  if (!isAbsolute(path)) return false;
+  const root = resolve(RUNTIME_DATA_ROOT);
+  const candidate = resolve(path);
+  return candidate === root || candidate.startsWith(`${root}/`);
 }
 
 function scopeIdentity(scope: ScopeRef): string {
