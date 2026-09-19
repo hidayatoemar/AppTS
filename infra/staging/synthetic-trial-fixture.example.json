@@ -1,0 +1,87 @@
+{
+  "syntheticTrial": true,
+  "trialId": "TRIAL-LOCAL-001",
+  "scopeBaselines": [
+    {
+      "scopeRef": {
+        "situationId": "SIT-STAGING-001",
+        "subjectType": "SERVICE",
+        "subjectId": "SVC-STAGING-001"
+      },
+      "version": 0,
+      "truthRefs": ["TRUTH-DOWN-STAGING"],
+      "evidenceRefs": ["EV-DIAGNOSIS-STAGING"],
+      "responsibility": {
+        "responsibilityRef": "RESP-STAGING-001",
+        "scopeRef": {
+          "situationId": "SIT-STAGING-001",
+          "subjectType": "SERVICE",
+          "subjectId": "SVC-STAGING-001"
+        },
+        "holderPersonRef": "PERSON-STAGING-001",
+        "roleRef": "ROLE-NOC-STAGING",
+        "assignmentRef": "ASSIGN-STAGING-001",
+        "dutyRef": "DUTY-STAGING-001",
+        "availabilityRef": "AVAIL-STAGING-001",
+        "authorityBasisRef": "AUTH-RS-A022",
+        "effectiveTime": "2026-09-19T00:00:00.000Z",
+        "currentness": { "status": "CURRENT" },
+        "provenance": { "sourceRefs": ["EV-RESP-STAGING"], "chainRefs": [] }
+      },
+      "actingContextCandidates": [
+        {
+          "contextRef": "CTX-STAGING-001",
+          "personRef": "PERSON-STAGING-001",
+          "roleRef": "ROLE-NOC-STAGING",
+          "assignmentRef": "ASSIGN-STAGING-001",
+          "dutyRef": "DUTY-STAGING-001",
+          "availabilityRef": "AVAIL-STAGING-001",
+          "responsibilityRef": "RESP-STAGING-001",
+          "authorityBasisRef": "AUTH-RS-A022",
+          "scopeRef": {
+            "situationId": "SIT-STAGING-001",
+            "subjectType": "SERVICE",
+            "subjectId": "SVC-STAGING-001"
+          },
+          "validity": {
+            "conditionRef": "COND-VALID-STAGING",
+            "satisfied": true,
+            "evidenceRefs": ["EV-VALID-STAGING"]
+          },
+          "applicability": {
+            "conditionRef": "COND-APPLICABLE-STAGING",
+            "satisfied": true,
+            "evidenceRefs": ["EV-APPLICABLE-STAGING"]
+          },
+          "currentness": { "status": "CURRENT" },
+          "integrity": {
+            "sufficient": true,
+            "conflict": false,
+            "evidenceRefs": ["EV-INTEGRITY-STAGING"]
+          },
+          "provenance": { "sourceRefs": ["EV-CTX-STAGING"], "chainRefs": [] }
+        }
+      ],
+      "dependencyRefs": [],
+      "actionExecutions": [],
+      "materialEffects": [],
+      "evidenceProvenance": [],
+      "responsibilityHandoverEffects": [],
+      "dependencyWaitingUpdates": [],
+      "residualObligationRefs": [],
+      "verificationClosureEffects": [],
+      "otherAuthoritativeP01ToP10Records": []
+    }
+  ],
+  "outcomeInstances": [
+    {
+      "commandId": "CMD-STAGING-001",
+      "executorRef": "EXECUTOR-STAGING",
+      "responseRef": "RESPONSE-STAGING-001",
+      "executionEvidenceRefs": ["EV-EXEC-STAGING"],
+      "beforeTruthRefs": ["TRUTH-DOWN-STAGING"],
+      "afterTruthRefs": ["TRUTH-UP-STAGING"],
+      "effectEvidenceRefs": ["EV-RECOVERY-STAGING"]
+    }
+  ]
+}
