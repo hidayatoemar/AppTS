@@ -83,12 +83,21 @@ sudo systemctl enable appts-restore-service-local.service >/dev/null
 sudo systemctl restart appts-restore-service-local.service
 sudo systemctl is-active --quiet appts-restore-service-local.service
 
-node --input-type=module -e "
-  const health = await fetch('http://127.0.0.1:8080/healthz');
-  if (!health.ok) throw new Error('healthz failed');
-  const ready = await fetch('http://127.0.0.1:8080/readyz');
-  if (!ready.ok) throw new Error('readyz failed');
-"
+node --input-type=module <<'NODE'
+for (let attempt = 0; attempt < 30; attempt += 1) {
+  try {
+    const health = await fetch("http://127.0.0.1:8080/healthz");
+    const ready = await fetch("http://127.0.0.1:8080/readyz");
+    if (health.ok && ready.ok) {
+      console.log("local_runtime_readiness=PASS");
+      process.exit(0);
+    }
+  } catch {}
+  await new Promise((resolve) => setTimeout(resolve, 500));
+}
+console.error("local_runtime_readiness=TIMEOUT");
+process.exit(1);
+NODE
 
 listener="$(ss -lntH | awk '{print $4}' | grep -E '(^|])?:8080$' || true)"
 test "$listener" = "127.0.0.1:8080"
