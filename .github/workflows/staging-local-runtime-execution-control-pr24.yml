@@ -12,7 +12,7 @@ permissions:
 env:
   PRODUCT_SHA: 01097454cc73b9917b284c876af4c603856ebe6e
   ADMITTED_MAIN_SHA: fc05398bb1e003a104cb644d6d4879f64b613be9
-  CANDIDATE_SHA: 5a6aeba589642f1d8627fab4322f437c83a74417
+  CANDIDATE_SHA: f19381423e1cb02f7c06dff5abd198e1d0dc36dc
 
 jobs:
   gate-product:
@@ -273,7 +273,7 @@ jobs:
           grep -Fx '# pass 90' /tmp/target-gate-a.tap
           grep -Fx '# fail 0' /tmp/target-gate-a.tap
           grep -Fx '# skipped 0' /tmp/target-gate-a.tap
-          node --test "$workb"/tests/*.test.mjs "$workb"/tests/vectors/*.test.mjs | tee /tmp/target-gate-b.tap
+          (cd "$workb" && node --test tests/*.test.mjs tests/vectors/*.test.mjs) | tee /tmp/target-gate-b.tap
           grep -Fx '# tests 92' /tmp/target-gate-b.tap
           grep -Fx '# pass 92' /tmp/target-gate-b.tap
           grep -Fx '# fail 0' /tmp/target-gate-b.tap
