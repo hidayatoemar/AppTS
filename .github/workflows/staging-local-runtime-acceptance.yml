@@ -279,7 +279,7 @@ jobs:
           grep -Fx '# pass 90' /tmp/target-gate-a.tap
           grep -Fx '# fail 0' /tmp/target-gate-a.tap
           grep -Fx '# skipped 0' /tmp/target-gate-a.tap
-          node --test "$workb"/tests/*.test.mjs "$workb"/tests/vectors/*.test.mjs | tee /tmp/target-gate-b.tap
+          (cd "$workb" && node --test tests/*.test.mjs tests/vectors/*.test.mjs) | tee /tmp/target-gate-b.tap
           grep -Fx '# tests 92' /tmp/target-gate-b.tap
           grep -Fx '# pass 92' /tmp/target-gate-b.tap
           grep -Fx '# fail 0' /tmp/target-gate-b.tap
