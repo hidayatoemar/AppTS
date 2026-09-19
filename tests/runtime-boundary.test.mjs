@@ -145,6 +145,10 @@ test("RB-02 missing deployment config or semantic fixture override fails closed"
     () => validateSyntheticTrialFixtureObject({ ...fixture(), policyConfig: firstSlicePolicy }),
     /FORBIDDEN_OR_UNKNOWN_FIELD:policyConfig/,
   );
+  assert.throws(
+    () => validateRuntimeConfigObject(validConfig({ dataDir: `${RUNTIME_DATA_ROOT}/../../outside` })),
+    /INVALID_RUNTIME_DATA_DIR/,
+  );
 });
 
 test("RB-03 health and readiness expose infrastructure observations only", async () => {
@@ -207,6 +211,27 @@ test("RB-12 transport logging excludes raw request and fixture/secret material",
     assert.equal(response.status, 400);
     assert.equal(entries.join("\n").includes(marker), false);
     assert.equal(entries.join("\n").includes("EV-DIAGNOSIS-STAGING"), false);
+
+    const invalidMediaType = await fetch(`http://127.0.0.1:${port}/commands`, {
+      method: "POST",
+      headers: { "content-type": "application/jsonx" },
+      body: JSON.stringify(command()),
+    });
+    assert.equal(invalidMediaType.status, 400);
+
+    const charsetJson = await fetch(`http://127.0.0.1:${port}/commands`, {
+      method: "POST",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify(command()),
+    });
+    assert.equal(charsetJson.status, 200);
+
+    const oversizedUtf8 = await fetch(`http://127.0.0.1:${port}/commands`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...command(), payloadRef: "é".repeat(33000) }),
+    });
+    assert.equal(oversizedUtf8.status, 413);
   } finally {
     await boundary.close();
   }
