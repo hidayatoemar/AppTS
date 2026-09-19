@@ -150,7 +150,7 @@ jobs:
             )
           done
           tar -czf "$RUNNER_TEMP/gate-a.tar.gz" -C gate-a dist tests
-          tar -czf "$RUNNER_TEMP/gate-b.tar.gz" -C gate-b dist tests
+          tar -czf "$RUNNER_TEMP/gate-b.tar.gz" -C gate-b dist tests infra/staging
           printf '%s\n' "$CANDIDATE_SHA" > DEPLOYED_COMMIT
           tar -czf "$RUNNER_TEMP/local-runtime-$CANDIDATE_SHA.tar.gz"             DEPLOYED_COMMIT package.json README.md dist tests infra/staging
           sha256sum "$RUNNER_TEMP/local-runtime-$CANDIDATE_SHA.tar.gz"             | tee "$RUNNER_TEMP/local-runtime-$CANDIDATE_SHA.sha256"
