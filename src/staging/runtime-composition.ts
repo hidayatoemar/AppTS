@@ -10,6 +10,13 @@ import { resolveRsA022Bindings, RS_A_022 } from "../runtime/rs-a-022-binding.js"
 import type { Clock } from "../simulator/clock.js";
 import type { IdGenerator } from "../simulator/ids.js";
 import type { LocalRuntimeConfig, SyntheticOutcomeInstance, SyntheticTrialFixture } from "./runtime-config.js";
+import {
+  HITL_RUNTIME_PROFILE,
+  type HitlTrial1RuntimeScenario,
+  type TrialOperatorViewDTO,
+} from "./hitl-trial1-contracts.js";
+import { createHitlTrial1Runtime, type HitlCommandResult } from "./hitl-trial1-runtime.js";
+import { buildTrialOperatorView } from "./hitl-trial1-operator-view.js";
 
 export const STAGING_ACTION_ID = RS_A_022;
 export const STAGING_PURPOSE = "RESTORE_SERVICE" as const;
@@ -22,7 +29,8 @@ export const STAGING_EFFECT_TYPE_REF = "EFFECT-SERVICE-RECOVERED" as const;
 export interface LocalRuntimeComposition {
   repository: LocalJsonlStore;
   policy: typeof firstSlicePolicy;
-  execute(envelope: ActionCommandEnvelope): Promise<CommandPipelineResult>;
+  execute(envelope: ActionCommandEnvelope): Promise<CommandPipelineResult | HitlCommandResult>;
+  buildOperatorView?(selectedActingContextRef?: string): Promise<TrialOperatorViewDTO>;
 }
 
 class SystemClock implements Clock {
@@ -79,41 +87,63 @@ class SyntheticTrialActionEffectPort implements ActionEffectPort {
 export async function createLocalRuntimeComposition(
   config: LocalRuntimeConfig,
   fixture: SyntheticTrialFixture,
+  hitlScenario?: HitlTrial1RuntimeScenario,
 ): Promise<LocalRuntimeComposition> {
   assertSemanticAdmissionManifest();
   if (fixture.syntheticTrial !== true) throw new Error("SYNTHETIC_TRIAL_MARKER_REQUIRED");
+  if (config.profile === HITL_RUNTIME_PROFILE && !hitlScenario) throw new Error("HITL_SCENARIO_REQUIRED");
+  if (config.profile !== HITL_RUNTIME_PROFILE && hitlScenario) throw new Error("HITL_SCENARIO_PROFILE_MISMATCH");
+  if (hitlScenario && hitlScenario.trialId !== fixture.trialId) throw new Error("HITL_FIXTURE_TRIAL_ID_MISMATCH");
 
   await mkdir(config.dataDir, { recursive: true });
   const repository = new LocalJsonlStore(config.dataDir);
+  const baselines = hitlScenario ? [hitlScenario.scopeBaseline] : fixture.scopeBaselines;
 
-  for (const baseline of fixture.scopeBaselines) {
+  for (const baseline of baselines) {
     if (baseline.scopeRef.subjectType !== STAGING_SUBJECT_TYPE) throw new Error("STAGING_SERVICE_SCOPE_ONLY");
     repository.seed(baseline);
   }
+  for (const baseline of baselines) await repository.replay(baseline.scopeRef);
 
-  for (const baseline of fixture.scopeBaselines) {
-    await repository.replay(baseline.scopeRef);
-  }
-
+  const clock = new SystemClock();
+  const ids = new CryptoIdGenerator();
   const deps: CommandRuntimeDeps = {
     repository,
     policy: firstSlicePolicy,
     executor: new SyntheticTrialActionEffectPort(fixture.outcomeInstances),
-    clock: new SystemClock(),
-    ids: new CryptoIdGenerator(),
+    clock,
+    ids,
     requiredAuthorityRefByAction: {
       [STAGING_ACTION_ID]: STAGING_REQUIRED_AUTHORITY_REF,
     },
   };
 
-  return {
+  const hitl = hitlScenario
+    ? createHitlTrial1Runtime({ repository, scenario: hitlScenario, clock, ids })
+    : null;
+  if (hitl) await hitl.recoverPendingA14();
+
+  const composition: LocalRuntimeComposition = {
     repository,
     policy: firstSlicePolicy,
     execute: async (envelope) => {
-      assertStagingCommandAdmission(envelope);
-      return executeCommand(envelope, deps);
+      if (envelope.actionId === STAGING_ACTION_ID) {
+        assertStagingCommandAdmission(envelope);
+        return executeCommand(envelope, deps);
+      }
+      if (!hitl) {
+        assertStagingCommandAdmission(envelope);
+        return executeCommand(envelope, deps);
+      }
+      return hitl.execute(envelope);
     },
   };
+
+  if (hitl && hitlScenario) {
+    composition.buildOperatorView = async (selectedActingContextRef) =>
+      buildTrialOperatorView(repository, hitlScenario, selectedActingContextRef, true);
+  }
+  return composition;
 }
 
 export function assertSemanticAdmissionManifest(): void {
