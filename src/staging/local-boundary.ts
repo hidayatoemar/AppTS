@@ -8,9 +8,12 @@ import {
 import type { ActionCommandEnvelope, PurposeInstanceRef, ScopeRef } from "../contracts/ce-di.js";
 import type { CommandPipelineResult } from "../runtime/command-pipeline.js";
 import { RS_A_022 } from "../runtime/rs-a-022-binding.js";
+import type { HitlCommandResult } from "./hitl-trial1-runtime.js";
+import type { TrialOperatorViewDTO } from "./hitl-trial1-contracts.js";
 import { LOOPBACK_ADDRESS } from "./runtime-config.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
+const HITL_ACTION_IDS = new Set(["RS-A-012", "RS-A-013", "RS-A-014", "RS-A-015"]);
 
 export interface InfrastructureLogger {
   log(event: string, fields?: Readonly<Record<string, string | number | boolean>>): void;
@@ -25,7 +28,9 @@ export interface LocalBoundary {
 
 export interface LocalBoundaryOptions {
   port: number;
-  execute(envelope: ActionCommandEnvelope): Promise<CommandPipelineResult>;
+  execute(envelope: ActionCommandEnvelope): Promise<CommandPipelineResult | HitlCommandResult>;
+  trialConsoleHtml?: string;
+  operatorView?(actingContextRef?: string): Promise<TrialOperatorViewDTO>;
   logger?: InfrastructureLogger;
 }
 
@@ -47,7 +52,7 @@ export function createLocalBoundary(options: LocalBoundaryOptions): LocalBoundar
   let active = false;
 
   const server = createServer((request, response) => {
-    void handleRequest(request, response, options.execute, logger, () => ready);
+    void handleRequest(request, response, options, logger, () => ready);
   });
 
   return {
@@ -79,12 +84,13 @@ export function createLocalBoundary(options: LocalBoundaryOptions): LocalBoundar
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
-  execute: (envelope: ActionCommandEnvelope) => Promise<CommandPipelineResult>,
+  options: LocalBoundaryOptions,
   logger: InfrastructureLogger,
   readiness: () => boolean,
 ): Promise<void> {
   const method = request.method ?? "";
-  const path = request.url ?? "";
+  const rawPath = request.url ?? "";
+  const [path, query = ""] = rawPath.split("?", 2);
 
   if (method === "GET" && path === "/healthz") {
     writeJson(response, 200, { alive: true });
@@ -101,6 +107,37 @@ async function handleRequest(
       localListenerActive: true,
     });
     logger.log("transport_outcome", { method, path, status: ready ? 200 : 503 });
+    return;
+  }
+
+  if (method === "GET" && path === "/trial-1") {
+    if (!options.trialConsoleHtml) {
+      writeJson(response, 404, { error: "NOT_FOUND" });
+      return;
+    }
+    writeHtml(response, 200, options.trialConsoleHtml);
+    logger.log("transport_outcome", { method, path, status: 200 });
+    return;
+  }
+
+  if (method === "GET" && path === "/trial-1/operator-view") {
+    if (!options.operatorView) {
+      writeJson(response, 404, { error: "NOT_FOUND" });
+      return;
+    }
+    try {
+      const actingContextRef = queryParam(query, "actingContextRef");
+      const view = await options.operatorView(actingContextRef);
+      writeJson(response, 200, view);
+      logger.log("transport_outcome", { method, path, status: 200 });
+    } catch (error) {
+      if (error instanceof TransportInputError) {
+        writeJson(response, error.status, { error: error.message });
+        return;
+      }
+      writeJson(response, 500, { error: "LOCAL_RUNTIME_FAILURE" });
+      logger.log("transport_outcome", { method, path, status: 500 });
+    }
     return;
   }
 
@@ -123,7 +160,7 @@ async function handleRequest(
     const body = await readJsonBody(request);
     const envelope = parseCommandEnvelope(body);
     commandId = envelope.commandId;
-    const result = await execute(envelope);
+    const result = await options.execute(envelope);
     writeJson(response, 200, result);
     logger.log("transport_outcome", { method, path, status: 200, commandId });
   } catch (error) {
@@ -132,14 +169,31 @@ async function handleRequest(
       logger.log("transport_outcome", { method, path, status: error.status });
       return;
     }
-    if (error instanceof Error && error.message === "IMPLEMENTATION_REPLAY_CONFLICT") {
-      writeJson(response, 409, { error: "IMPLEMENTATION_REPLAY_CONFLICT" });
+    if (
+      error instanceof Error &&
+      (error.message === "IMPLEMENTATION_REPLAY_CONFLICT" ||
+        error.message === "A14_IDENTITY_COLLISION_OR_REPLAY_CONFLICT")
+    ) {
+      writeJson(response, 409, { error: error.message });
       logger.log("transport_outcome", {
         method,
         path,
         status: 409,
         ...(commandId === undefined ? {} : { commandId }),
       });
+      return;
+    }
+    if (
+      error instanceof Error &&
+      [
+        "HITL_INTENT_REQUIRED",
+        "HITL_INTENT_NOT_ADMITTED",
+        "HITL_PURPOSE_NOT_ADMITTED",
+        "HITL_SCOPE_NOT_ADMITTED",
+      ].includes(error.message)
+    ) {
+      writeJson(response, 400, { error: error.message });
+      logger.log("transport_outcome", { method, path, status: 400 });
       return;
     }
     writeJson(response, 500, { error: "LOCAL_RUNTIME_FAILURE" });
@@ -212,7 +266,9 @@ export function parseCommandEnvelope(value: unknown): ActionCommandEnvelope {
 
   const commandId = requiredString(record.commandId, "commandId");
   const actionId = requiredString(record.actionId, "actionId");
-  if (actionId !== RS_A_022) throw new TransportInputError("STAGING_ACTION_NOT_ADMITTED");
+  if (actionId !== RS_A_022 && !HITL_ACTION_IDS.has(actionId)) {
+    throw new TransportInputError("STAGING_ACTION_NOT_ADMITTED");
+  }
 
   const purposeRef = parsePurposeRef(record.purposeRef);
   const scopeRef = parseScopeRef(record.scopeRef);
@@ -222,7 +278,11 @@ export function parseCommandEnvelope(value: unknown): ActionCommandEnvelope {
     record.requestedByActorOrMachineRef,
     "requestedByActorOrMachineRef",
   );
-  if (!Number.isInteger(record.expectedInputVersion) || typeof record.expectedInputVersion !== "number" || record.expectedInputVersion < 0) {
+  if (
+    !Number.isInteger(record.expectedInputVersion) ||
+    typeof record.expectedInputVersion !== "number" ||
+    record.expectedInputVersion < 0
+  ) {
     throw new TransportInputError("INVALID_expectedInputVersion");
   }
   const requestTime = requiredString(record.requestTime, "requestTime");
@@ -247,7 +307,9 @@ export function parseCommandEnvelope(value: unknown): ActionCommandEnvelope {
         }),
     expectedInputVersion: record.expectedInputVersion,
     requestTime,
-    ...(record.payloadRef === undefined ? {} : { payloadRef: requiredString(record.payloadRef, "payloadRef") }),
+    ...(record.payloadRef === undefined
+      ? {}
+      : { payloadRef: requiredString(record.payloadRef, "payloadRef") }),
     evidenceRefs,
   };
 }
@@ -278,6 +340,26 @@ function parseScopeRef(value: unknown): ScopeRef {
       ? {}
       : { relationRef: requiredString(record.relationRef, "scopeRef.relationRef") }),
   };
+}
+
+function queryParam(query: string, name: string): string | undefined {
+  if (!query) return undefined;
+  for (const pair of query.split("&")) {
+    const [rawKey, rawValue = ""] = pair.split("=", 2);
+    let key: string;
+    let value: string;
+    try {
+      key = decodeURIComponent(rawKey.replace(/\+/g, " "));
+      value = decodeURIComponent(rawValue.replace(/\+/g, " "));
+    } catch {
+      throw new TransportInputError("INVALID_QUERY_ENCODING");
+    }
+    if (key === name) {
+      if (!value) throw new TransportInputError("INVALID_ACTING_CONTEXT_REF");
+      return value;
+    }
+  }
+  return undefined;
 }
 
 function asRecord(value: unknown, message: string): Record<string, unknown> {
@@ -317,4 +399,10 @@ function writeJson(response: ServerResponse, status: number, value: unknown): vo
   response.statusCode = status;
   response.setHeader("content-type", "application/json; charset=utf-8");
   response.end(JSON.stringify(value));
+}
+
+function writeHtml(response: ServerResponse, status: number, value: string): void {
+  response.statusCode = status;
+  response.setHeader("content-type", "text/html; charset=utf-8");
+  response.end(value);
 }
