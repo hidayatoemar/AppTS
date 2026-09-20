@@ -5,6 +5,7 @@ import {
   loadLocalRuntimeConfig,
 } from "./runtime-config.js";
 import { createLocalRuntimeComposition } from "./runtime-composition.js";
+import { HITL_TRIAL1_CONSOLE_HTML } from "./hitl-trial1-console.js";
 
 const logger: InfrastructureLogger = {
   log: (event, fields = {}) => {
@@ -17,11 +18,17 @@ async function main(): Promise<void> {
   if (!configuredPath) throw new Error("APPTS_RUNTIME_CONFIG_REQUIRED");
   if (configuredPath !== RUNTIME_CONFIG_PATH) throw new Error("APPTS_RUNTIME_CONFIG_PATH_NOT_ADMITTED");
 
-  const { config, fixture } = await loadLocalRuntimeConfig(configuredPath);
-  const runtime = await createLocalRuntimeComposition(config, fixture);
+  const { config, fixture, hitlScenario } = await loadLocalRuntimeConfig(configuredPath);
+  const runtime = await createLocalRuntimeComposition(config, fixture, hitlScenario);
   const boundary = createLocalBoundary({
     port: config.port,
     execute: runtime.execute,
+    ...(hitlScenario === undefined
+      ? {}
+      : {
+          trialConsoleHtml: HITL_TRIAL1_CONSOLE_HTML,
+          operatorView: runtime.buildOperatorView,
+        }),
     logger,
   });
 
