@@ -7,6 +7,10 @@ on:
       - 'src/staging/**'
       - 'tests/runtime-boundary.test.mjs'
       - 'tests/runtime-restart.test.mjs'
+      - 'tests/hitl-trial1.test.mjs'
+      - 'tests/fixtures/hitl-trial1-scenarios.mjs'
+      - 'tests/fixtures/hitl-trial1-oracles.mjs'
+      - 'infra/staging/hitl-trial1-scenario.example.json'
       - 'infra/staging/appts-restore-service-local.service'
       - 'infra/staging/provision-local-runtime.sh'
       - 'infra/staging/runtime.env.example'
@@ -20,6 +24,7 @@ permissions:
 env:
   PRODUCT_SHA: 01097454cc73b9917b284c876af4c603856ebe6e
   ADMITTED_MAIN_SHA: fc05398bb1e003a104cb644d6d4879f64b613be9
+  HITL_BASE_SHA: 78c0d5d951ec53e01590967f6f41dc6af8b3d6b4
 
 jobs:
   gate-product:
@@ -32,7 +37,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Gate A exact Product semantic baseline
+      - name: Legacy Product semantic baseline 90
         shell: bash
         run: |
           set -euo pipefail
@@ -55,7 +60,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Gate B exact admitted-main baseline
+      - name: Legacy admitted-main baseline 92
         shell: bash
         run: |
           set -euo pipefail
@@ -68,7 +73,57 @@ jobs:
           grep -Fx '# fail 0' /tmp/gate-b.tap
           grep -Fx '# skipped 0' /tmp/gate-b.tap
 
+  gate-a-hitl-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.HITL_BASE_SHA }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Gate A exact admitted HITL base 107
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$HITL_BASE_SHA"
+          npm install --no-save --ignore-scripts --no-audit --no-fund typescript@5.8.3
+          npm run build
+          node --test tests/*.test.mjs tests/vectors/*.test.mjs | tee /tmp/hitl-gate-a.tap
+          grep -Fx '# tests 107' /tmp/hitl-gate-a.tap
+          grep -Fx '# pass 107' /tmp/hitl-gate-a.tap
+          grep -Fx '# fail 0' /tmp/hitl-gate-a.tap
+          grep -Fx '# skipped 0' /tmp/hitl-gate-a.tap
+
+  gate-b-hitl-suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Gate B exact HITL-T01 through HITL-T22
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save --ignore-scripts --no-audit --no-fund typescript@5.8.3
+          npm run build
+          test "$(grep -Ec 'test\("HITL-T[0-9]{2}' tests/hitl-trial1.test.mjs)" = '22'
+          for id in $(seq -w 1 22); do
+            grep -q "HITL-T$id" tests/hitl-trial1.test.mjs
+          done
+          node --test tests/hitl-trial1.test.mjs | tee /tmp/hitl-gate-b.tap
+          grep -Fx '# tests 22' /tmp/hitl-gate-b.tap
+          grep -Fx '# pass 22' /tmp/hitl-gate-b.tap
+          grep -Fx '# fail 0' /tmp/hitl-gate-b.tap
+          grep -Fx '# skipped 0' /tmp/hitl-gate-b.tap
+
   gate-candidate:
+    needs: [gate-a-hitl-baseline, gate-b-hitl-suite]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -79,44 +134,42 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Verify exact bounded diff
+      - name: Gate C verify exact bounded 13-file diff
         shell: bash
         run: |
           set -euo pipefail
-          git cat-file -e "$ADMITTED_MAIN_SHA^{commit}"
-          git cat-file -e "$PRODUCT_SHA^{commit}"
+          git cat-file -e "$HITL_BASE_SHA^{commit}"
           cat > /tmp/expected-files <<'EOF'
           .github/workflows/staging-local-runtime-acceptance.yml
-          infra/staging/appts-restore-service-local.service
-          infra/staging/provision-local-runtime.sh
-          infra/staging/runtime.env.example
-          infra/staging/synthetic-trial-fixture.example.json
+          infra/staging/hitl-trial1-scenario.example.json
+          src/staging/hitl-trial1-console.ts
+          src/staging/hitl-trial1-contracts.ts
+          src/staging/hitl-trial1-operator-view.ts
+          src/staging/hitl-trial1-runtime.ts
           src/staging/local-boundary.ts
           src/staging/main.ts
-          src/staging/node-builtins.d.ts
           src/staging/runtime-composition.ts
           src/staging/runtime-config.ts
-          tests/runtime-boundary.test.mjs
-          tests/runtime-restart.test.mjs
+          tests/fixtures/hitl-trial1-oracles.mjs
+          tests/fixtures/hitl-trial1-scenarios.mjs
+          tests/hitl-trial1.test.mjs
           EOF
-          git diff --name-only "$ADMITTED_MAIN_SHA"..HEAD | sort > /tmp/actual-files
+          git diff --name-only "$HITL_BASE_SHA"..HEAD | sort > /tmp/actual-files
           diff -u /tmp/expected-files /tmp/actual-files
-          git diff --quiet "$PRODUCT_SHA"..HEAD --             src/contracts src/runtime src/persistence src/adapters src/config src/simulator tests/vectors
-      - name: Strict TypeScript compile and Gate C candidate
+          test "$(wc -l < /tmp/actual-files)" = '13'
+          git diff --quiet "$HITL_BASE_SHA"..HEAD --             src/contracts src/runtime src/persistence src/adapters src/config src/simulator tests/vectors
+      - name: Gate C strict compile and exact full candidate 129
         shell: bash
         run: |
           set -euo pipefail
           npm install --no-save --ignore-scripts --no-audit --no-fund typescript@5.8.3
           test ! -d node_modules/@types/node
           npm run build
-          node --test tests/*.test.mjs tests/vectors/*.test.mjs | tee /tmp/gate-c.tap
-          grep -Fx '# tests 107' /tmp/gate-c.tap
-          grep -Fx '# pass 107' /tmp/gate-c.tap
-          grep -Fx '# fail 0' /tmp/gate-c.tap
-          grep -Fx '# skipped 0' /tmp/gate-c.tap
-          for id in $(seq -w 1 15); do
-            grep -q "RB-$id" tests/runtime-boundary.test.mjs tests/runtime-restart.test.mjs
-          done
+          node --test tests/*.test.mjs tests/vectors/*.test.mjs | tee /tmp/hitl-gate-c.tap
+          grep -Fx '# tests 129' /tmp/hitl-gate-c.tap
+          grep -Fx '# pass 129' /tmp/hitl-gate-c.tap
+          grep -Fx '# fail 0' /tmp/hitl-gate-c.tap
+          grep -Fx '# skipped 0' /tmp/hitl-gate-c.tap
 
   deploy-staging:
     if: github.event_name == 'workflow_dispatch' && github.repository == 'hidayatoemar/AppTS' && github.ref == 'refs/heads/mcr/staging-loopback-runtime'
