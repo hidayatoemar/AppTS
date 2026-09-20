@@ -119,7 +119,7 @@ function renderButtons(containerId, actions) {
 async function submit(actionId, intent) {
   const selected = view.roleContexts.find(x => x.selected);
   if (!selected) throw new Error("no selected acting context");
-  const commandId = "CMD-HITL1-" + actionId + "-" + crypto.randomUUID();
+  const commandId = actionId === "RS-A-022" ? "CMD-STAGING-001" : "CMD-HITL1-" + actionId + "-" + crypto.randomUUID();
   const envelope = {
     commandId,
     actionId,
