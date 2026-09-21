@@ -874,6 +874,7 @@ async function assertCommittedA14HistoryForScope(
         committed,
         commandId,
         HITL_ACTIONS.closureEligibility,
+        recovery.records.filter((record) => record.version <= committed.version),
       );
       assertA14HistoryCoherent(history);
     }
@@ -891,13 +892,19 @@ async function requireCommittedHitlHistoryInScope(
     (record) => record.batch.commandReplayIdentity?.commandId === commandId,
   );
   if (matches.length !== 1) throw new Error("HITL_AUTHORITATIVE_HISTORY_CORRUPTION");
-  return extractCommittedHitlHistory(matches[0], commandId, actionId);
+  return extractCommittedHitlHistory(
+    matches[0],
+    commandId,
+    actionId,
+    recovery.records.filter((record) => record.version <= matches[0].version),
+  );
 }
 
 function extractCommittedHitlHistory(
   committedRecord: JsonlCommittedRecord,
   commandId: Ref,
   actionId: Exclude<HitlTrial1ActionId, "RS-A-022">,
+  historicalRecords: readonly JsonlCommittedRecord[],
 ): CommittedHitlHistory {
   const replayIdentity = committedRecord.batch.commandReplayIdentity;
   if (!replayIdentity || replayIdentity.commandId !== commandId) {
@@ -935,6 +942,7 @@ function extractCommittedHitlHistory(
   }
   return {
     committedRecord,
+    historicalRecords,
     execution,
     verification,
     normalizedEnvelope: replayIdentity.normalizedEnvelope,
@@ -942,7 +950,8 @@ function extractCommittedHitlHistory(
 }
 
 function assertA14HistoryCoherent(history: CommittedHitlHistory): void {
-  const { verification, normalizedEnvelope } = history;
+  const { verification, normalizedEnvelope, committedRecord, historicalRecords } = history;
+  const historicalBasis = verification.canonicalA14HistoricalBasis;
   if (
     verification.actionId !== HITL_ACTIONS.closureEligibility ||
     verification.closureEligibilityRef === undefined ||
@@ -951,29 +960,111 @@ function assertA14HistoryCoherent(history: CommittedHitlHistory): void {
     verification.closureDecisionRef !== undefined ||
     typeof verification.canonicalA14IdentityBytes !== "string" ||
     typeof verification.canonicalA14IdentityDigest !== "string" ||
-    typeof verification.canonicalA14GoverningBasisVersion !== "number"
+    typeof verification.canonicalA14GoverningBasisVersion !== "number" ||
+    historicalBasis === undefined
   ) {
-    throw new Error("A14_AUTHORITATIVE_HISTORY_CORRUPTION");
+    throw new Error("HITL_AUTHORITATIVE_HISTORY_CORRUPTION");
   }
+
   let envelope: ActionCommandEnvelope;
   try {
     envelope = JSON.parse(normalizedEnvelope) as ActionCommandEnvelope;
   } catch {
-    throw new Error("A14_AUTHORITATIVE_HISTORY_CORRUPTION");
+    throw new Error("HITL_AUTHORITATIVE_HISTORY_CORRUPTION");
   }
+
+  const expectedVersion = verification.determiningExpectedVersion;
+  const canonicalEvidenceRefs = historicalBasis.governingEvidenceBasis.map((item) => item.evidenceId);
+  const historicalResidualRefs = historicalBasis.residualObligationBasis.map((item) => item.obligationRef);
+  const committedEvidenceById = new Map(
+    committedRecord.batch.evidenceProvenance.map((item) => [item.evidenceId, item]),
+  );
+  const priorVerificationRefs = verificationRefsFromCommittedHistory(
+    historicalRecords.filter((record) => record.version <= expectedVersion),
+  );
+
   if (
     envelope.actionId !== HITL_ACTIONS.closureEligibility ||
     envelope.commandId !== verification.determiningCommandId ||
-    envelope.expectedInputVersion !== verification.determiningExpectedVersion ||
-    !sameStringArray(envelope.evidenceRefs, verification.determiningEvidenceRefs) ||
+    envelope.expectedInputVersion !== expectedVersion ||
+    verification.canonicalA14GoverningBasisVersion !== expectedVersion ||
+    historicalBasis.governingBasisVersion !== expectedVersion ||
+    JSON.stringify(historicalBasis) !== verification.canonicalA14IdentityBytes ||
+    historicalBasis.scenarioId !== envelope.purposeRef.compositionInstanceId ||
+    historicalBasis.evidenceBasisRef !== envelope.purposeRef.startedFromBasisRef ||
+    scopeIdentityFromHistoricalBasis(historicalBasis) !== scopeIdentity(envelope.scopeRef) ||
+    scopeIdentityFromHistoricalBasis(historicalBasis) !== scopeIdentity(committedRecord.batch.scopeRef) ||
+    !sameSortedStringArray(envelope.evidenceRefs, verification.determiningEvidenceRefs) ||
+    !sameSortedStringArray(canonicalEvidenceRefs, verification.determiningEvidenceRefs) ||
+    !sameSortedStringArray(
+      verification.governingResidualObligationRefs,
+      committedRecord.batch.residualObligationRefs,
+    ) ||
+    !sameSortedStringArray(
+      historicalResidualRefs,
+      verification.governingResidualObligationRefs,
+    ) ||
+    historicalBasis.serviceVerificationRef !== priorVerificationRefs.serviceVerificationRef ||
+    historicalBasis.customerVerificationRef !== priorVerificationRefs.customerVerificationRef ||
     verification.canonicalA14IdentityDigest !==
       sha256Hex(verification.canonicalA14IdentityBytes) ||
     envelope.commandId !==
       `${A14_COMMAND_PREFIX}${verification.canonicalA14IdentityDigest}` ||
     parseClosureEligibilityRef(verification.closureEligibilityRef) === undefined
   ) {
-    throw new Error("A14_AUTHORITATIVE_HISTORY_CORRUPTION");
+    throw new Error("HITL_AUTHORITATIVE_HISTORY_CORRUPTION");
   }
+
+  for (const basisEvidence of historicalBasis.governingEvidenceBasis) {
+    const committedEvidence = committedEvidenceById.get(basisEvidence.evidenceId);
+    if (
+      committedEvidence === undefined ||
+      committedEvidence.payloadOrRecordRef !== basisEvidence.payloadOrRecordRef ||
+      committedEvidence.currentness.status !== basisEvidence.currentnessStatus ||
+      (committedEvidence.currentness.basisRef ?? null) !== basisEvidence.currentnessBasisRef ||
+      (committedEvidence.integrityConflictRef ?? null) !== basisEvidence.evidenceIntegrityConflictRef
+    ) {
+      throw new Error("HITL_AUTHORITATIVE_HISTORY_CORRUPTION");
+    }
+  }
+}
+
+function verificationRefsFromCommittedHistory(
+  records: readonly JsonlCommittedRecord[],
+): {
+  serviceVerificationRef: Ref | null;
+  customerVerificationRef: Ref | null;
+} {
+  let serviceVerificationRef: Ref | null = null;
+  let customerVerificationRef: Ref | null = null;
+  for (const record of records) {
+    for (const evaluation of record.batch.verificationClosureEffects) {
+      if (!isHitlVerificationClosureRecord(evaluation)) continue;
+      if (evaluation.serviceVerificationRef !== undefined) {
+        serviceVerificationRef = evaluation.serviceVerificationRef;
+      }
+      if (evaluation.customerVerificationRef !== undefined) {
+        customerVerificationRef = evaluation.customerVerificationRef;
+      }
+    }
+  }
+  return { serviceVerificationRef, customerVerificationRef };
+}
+
+function scopeIdentityFromHistoricalBasis(basis: HitlA14HistoricalBasis): string {
+  return [
+    basis.scope.situationId,
+    basis.scope.subjectType,
+    basis.scope.subjectId,
+    basis.scope.parentScopeRef ?? "",
+    basis.scope.relationRef ?? "",
+  ].join("|");
+}
+
+function sameSortedStringArray(a: readonly string[], b: readonly string[]): boolean {
+  const left = [...a].sort();
+  const right = [...b].sort();
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function sameStringArray(a: readonly string[], b: readonly string[]): boolean {
