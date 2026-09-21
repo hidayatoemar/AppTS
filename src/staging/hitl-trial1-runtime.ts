@@ -20,6 +20,7 @@ import {
   type ClosureDecisionIntent,
   type ClosureEligibilityResult,
   type CustomerVerificationIntent,
+  type HitlA14DeterminingIntegrityEntry,
   type HitlA14HistoricalBasis,
   type HitlTrial1ActionId,
   type HitlTrial1RuntimeScenario,
@@ -517,6 +518,27 @@ export function buildA14HistoricalBasis(
   };
 }
 
+export function buildA14DeterminingIntegrityBasis(
+  scenario: HitlTrial1RuntimeScenario,
+): HitlA14DeterminingIntegrityEntry[] {
+  return scenario.evidenceBasis.evidence
+    .map((evidence) => {
+      const matches = scenario.evidenceBasis.integrityAssessments.filter(
+        (item) => item.evidenceId === evidence.evidenceId,
+      );
+      if (matches.length !== 1) {
+        throw new Error("HITL_AUTHORITATIVE_HISTORY_CORRUPTION");
+      }
+      return {
+        evidenceId: evidence.evidenceId,
+        integritySufficient: matches[0].assessment.sufficient,
+        integrityConflict: matches[0].assessment.conflict,
+        integrityEvidenceRefs: [...matches[0].assessment.evidenceRefs].sort(),
+      };
+    })
+    .sort((a, b) => a.evidenceId.localeCompare(b.evidenceId));
+}
+
 async function recoverPendingA14(deps: RuntimeDeps, runtime: HitlTrial1Runtime): Promise<void> {
   const scopeRef = deps.scenario.scopeBaseline.scopeRef;
   await assertCommittedA14HistoryForScope(deps.repository, scopeRef);
@@ -770,6 +792,7 @@ function makeVerificationRecord(args: {
                 scenario,
                 requireA14Identity(identity).governingBasisVersion,
               ),
+              determiningIntegrityBasis: buildA14DeterminingIntegrityBasis(scenario),
             }
           : { closureDecisionRef: makeClosureDecisionRef(value as ClosureDecisionIntent) };
 
@@ -961,7 +984,8 @@ function assertA14HistoryCoherent(history: CommittedHitlHistory): void {
     typeof verification.canonicalA14IdentityBytes !== "string" ||
     typeof verification.canonicalA14IdentityDigest !== "string" ||
     typeof verification.canonicalA14GoverningBasisVersion !== "number" ||
-    historicalBasis === undefined
+    historicalBasis === undefined ||
+    !Array.isArray(verification.determiningIntegrityBasis)
   ) {
     throw new Error("HITL_AUTHORITATIVE_HISTORY_CORRUPTION");
   }
@@ -981,6 +1005,11 @@ function assertA14HistoryCoherent(history: CommittedHitlHistory): void {
   );
   const priorVerificationRefs = verificationRefsFromCommittedHistory(
     historicalRecords.filter((record) => record.version <= expectedVersion),
+  );
+
+  assertDeterminingIntegrityCoherent(
+    historicalBasis.governingEvidenceBasis,
+    verification.determiningIntegrityBasis,
   );
 
   if (
@@ -1026,6 +1055,51 @@ function assertA14HistoryCoherent(history: CommittedHitlHistory): void {
     ) {
       throw new Error("HITL_AUTHORITATIVE_HISTORY_CORRUPTION");
     }
+  }
+}
+
+function assertDeterminingIntegrityCoherent(
+  canonicalEvidenceBasis: HitlA14HistoricalBasis["governingEvidenceBasis"],
+  determiningIntegrityBasis: readonly HitlA14DeterminingIntegrityEntry[],
+): void {
+  const canonicalIds = canonicalEvidenceBasis.map((item) => item.evidenceId);
+  const determiningIds = determiningIntegrityBasis.map((item) => item.evidenceId);
+
+  if (
+    new Set(canonicalIds).size !== canonicalIds.length ||
+    new Set(determiningIds).size !== determiningIds.length ||
+    canonicalIds.length !== determiningIds.length
+  ) {
+    throw new Error("HITL_AUTHORITATIVE_HISTORY_CORRUPTION");
+  }
+
+  const determiningById = new Map(
+    determiningIntegrityBasis.map((item) => [item.evidenceId, item] as const),
+  );
+
+  for (const canonical of canonicalEvidenceBasis) {
+    const determining = determiningById.get(canonical.evidenceId);
+    if (
+      determining === undefined ||
+      canonical.integritySufficient !== determining.integritySufficient ||
+      canonical.integrityConflict !== determining.integrityConflict ||
+      !sameStringArray(
+        canonical.integrityEvidenceRefs,
+        [...canonical.integrityEvidenceRefs].sort(),
+      ) ||
+      !sameStringArray(
+        determining.integrityEvidenceRefs,
+        [...determining.integrityEvidenceRefs].sort(),
+      ) ||
+      !sameStringArray(canonical.integrityEvidenceRefs, determining.integrityEvidenceRefs)
+    ) {
+      throw new Error("HITL_AUTHORITATIVE_HISTORY_CORRUPTION");
+    }
+  }
+
+  const canonicalSet = new Set(canonicalIds);
+  if (determiningIds.some((evidenceId) => !canonicalSet.has(evidenceId))) {
+    throw new Error("HITL_AUTHORITATIVE_HISTORY_CORRUPTION");
   }
 }
 
