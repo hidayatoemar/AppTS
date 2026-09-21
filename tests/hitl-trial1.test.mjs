@@ -548,6 +548,12 @@ test("HITL-T19 A14 replay is single-effect and deterministic identity is collisi
     assert.equal(a14Record.canonicalA14IdentityBytes, identity.canonicalBytes);
     assert.equal(a14Record.canonicalA14IdentityDigest, identity.digest);
     assert.equal(a14Record.canonicalA14GoverningBasisVersion, identity.governingBasisVersion);
+    assert.deepEqual(a14Record.determiningIntegrityBasis, [{
+      evidenceId: "EV-HITL1-GOV",
+      integritySufficient: true,
+      integrityConflict: false,
+      integrityEvidenceRefs: ["EV-HITL1-INTEGRITY"],
+    }]);
 
     const beforeExecutions = snapshot.actionExecutions.length;
     const replay = await runtime.execute(identity.envelope);
@@ -580,20 +586,63 @@ test("HITL-T19 A14 replay is single-effect and deterministic identity is collisi
     );
 
     const currentnessChanged = clone(scenario);
-    currentnessChanged.evidenceBasis.evidence[0].currentness = { status: "STALE", basisRef: "EV-HITL1-STALE" };
+    currentnessChanged.evidenceBasis.evidence[0].currentness = {
+      status: "STALE",
+      basisRef: "EV-HITL1-STALE",
+    };
     assert.notEqual(
       buildIdentityCanonicalBytes(snapshot, currentnessChanged, identity.governingBasisVersion),
       identity.canonicalBytes,
     );
 
-    const integrityChanged = clone(scenario);
-    integrityChanged.evidenceBasis.integrityAssessments[0].assessment = {
-      sufficient: false,
-      conflict: true,
-      evidenceRefs: ["EV-HITL1-INTEGRITY-CONFLICT"],
-    };
+    const sufficientChanged = clone(scenario);
+    sufficientChanged.evidenceBasis.integrityAssessments[0].assessment.sufficient = false;
     assert.notEqual(
-      buildIdentityCanonicalBytes(snapshot, integrityChanged, identity.governingBasisVersion),
+      buildIdentityCanonicalBytes(snapshot, sufficientChanged, identity.governingBasisVersion),
+      identity.canonicalBytes,
+    );
+
+    const conflictChanged = clone(scenario);
+    conflictChanged.evidenceBasis.integrityAssessments[0].assessment.conflict = true;
+    assert.notEqual(
+      buildIdentityCanonicalBytes(snapshot, conflictChanged, identity.governingBasisVersion),
+      identity.canonicalBytes,
+    );
+
+    const membershipChanged = clone(scenario);
+    membershipChanged.evidenceBasis.integrityAssessments[0].assessment.evidenceRefs = [
+      "EV-HITL1-INTEGRITY",
+      "EV-HITL1-INTEGRITY-SECOND",
+    ];
+    assert.notEqual(
+      buildIdentityCanonicalBytes(snapshot, membershipChanged, identity.governingBasisVersion),
+      identity.canonicalBytes,
+    );
+
+    const integrityOrderA = clone(scenario);
+    integrityOrderA.evidenceBasis.integrityAssessments[0].assessment.evidenceRefs = [
+      "EV-HITL1-INTEGRITY-Z",
+      "EV-HITL1-INTEGRITY-A",
+    ];
+    const integrityOrderB = clone(scenario);
+    integrityOrderB.evidenceBasis.integrityAssessments[0].assessment.evidenceRefs = [
+      "EV-HITL1-INTEGRITY-A",
+      "EV-HITL1-INTEGRITY-Z",
+    ];
+    assert.equal(
+      buildIdentityCanonicalBytes(snapshot, integrityOrderA, identity.governingBasisVersion),
+      buildIdentityCanonicalBytes(snapshot, integrityOrderB, identity.governingBasisVersion),
+    );
+
+    const evidenceSideConflictChanged = clone(scenario);
+    evidenceSideConflictChanged.evidenceBasis.evidence[0].integrityConflictRef =
+      "CONFLICT-HITL1-EVIDENCE-SIDE";
+    assert.notEqual(
+      buildIdentityCanonicalBytes(
+        snapshot,
+        evidenceSideConflictChanged,
+        identity.governingBasisVersion,
+      ),
       identity.canonicalBytes,
     );
 
