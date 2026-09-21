@@ -83,6 +83,24 @@ export interface HitlTrial1RuntimeScenario {
   residualObligations: readonly HitlTrial1ResidualObligationPolicy[];
 }
 
+export interface HitlVerificationClosureRecord extends VerificationClosureEvaluation {
+  recordKind: "HITL1_VERIFICATION_CLOSURE";
+  recordRef: Ref;
+  actionId: Exclude<HitlTrial1ActionId, "RS-A-022">;
+  determiningCommandId: Ref;
+  determiningExpectedVersion: number;
+  determiningTime: string;
+  determiningEvidenceRefs: readonly Ref[];
+  governingResidualObligationRefs: readonly Ref[];
+  serviceVerificationRef?: Ref;
+  customerVerificationRef?: Ref;
+  closureEligibilityRef?: Ref;
+  closureDecisionRef?: Ref;
+  canonicalA14IdentityDigest?: string;
+  canonicalA14IdentityBytes?: string;
+  canonicalA14GoverningBasisVersion?: number;
+}
+
 export interface TrialActionProjection {
   actionId: HitlTrial1HumanActionId;
   mode: "HUMAN_ONLY";
@@ -181,7 +199,7 @@ export interface TrialOperatorViewDTO {
   latest: {
     execution?: ActionExecutionRecord;
     materialEffects: readonly MaterialEffectRecord[];
-    verificationClosure?: VerificationClosureEvaluation;
+    verificationClosure?: HitlVerificationClosureRecord;
   };
   verification: {
     serviceVerificationRef?: Ref;
