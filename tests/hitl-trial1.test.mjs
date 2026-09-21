@@ -658,7 +658,7 @@ test("HITL-T21 crash after classifiable basis recovers exactly one stable A14 is
     });
     await assert.rejects(
       () => corruptRuntime.recoverPendingA14(),
-      /A14_AUTHORITATIVE_HISTORY_CORRUPTION/,
+      /HITL_AUTHORITATIVE_HISTORY_CORRUPTION/,
     );
     secondRestart.repository.recoverRecords = originalRecover;
 
