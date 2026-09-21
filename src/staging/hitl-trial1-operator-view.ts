@@ -9,11 +9,16 @@ import {
   HITL_AUTHORITIES,
   type HitlTrial1HumanActionId,
   type HitlTrial1RuntimeScenario,
+  type HitlVerificationClosureRecord,
   type TrialActionProjection,
   type TrialMachineActionProjection,
   type TrialOperatorViewDTO,
 } from "./hitl-trial1-contracts.js";
-import { classifyA14, readHitlTrialState } from "./hitl-trial1-runtime.js";
+import {
+  classifyA14,
+  isHitlVerificationClosureRecord,
+  readHitlTrialState,
+} from "./hitl-trial1-runtime.js";
 
 export async function buildTrialOperatorView(
   repository: LocalJsonlStore,
@@ -27,6 +32,10 @@ export async function buildTrialOperatorView(
   const evidenceCurrentness = scenario.evidenceBasis.evidence.map((item) => structuredClone(item.currentness));
   const evidenceIntegrity = scenario.evidenceBasis.integrityAssessments.map((item) => structuredClone(item.assessment));
   const residualPolicy = new Map(scenario.residualObligations.map((item) => [item.obligationRef, item]));
+  const verificationRefs = currentVerificationRefs(snapshot);
+  const latestVerification = [...snapshot.verificationClosureEffects]
+    .reverse()
+    .find(isHitlVerificationClosureRecord);
 
   const recovery = humanProjection(
     "RS-A-022",
@@ -88,9 +97,9 @@ export async function buildTrialOperatorView(
     gateEnable: machineGate,
     projection: machineProjection,
     pendingRequiredIssuance: classification.ready && state.closureEligibility === undefined,
-    ...(state.closureEligibility === undefined
+    ...(verificationRefs.closureEligibilityRef === undefined
       ? {}
-      : { committedEligibilityRef: responseRef("RS-A-014", state.closureEligibility) }),
+      : { committedEligibilityRef: verificationRefs.closureEligibilityRef }),
     blockedReasons: [...classification.reasons],
   };
 
@@ -146,28 +155,24 @@ export async function buildTrialOperatorView(
         ? {}
         : { execution: structuredClone(snapshot.actionExecutions[snapshot.actionExecutions.length - 1]) }),
       materialEffects: structuredClone(snapshot.materialEffects),
-      ...(snapshot.verificationClosureEffects.length === 0
+      ...(latestVerification === undefined
         ? {}
-        : {
-            verificationClosure: structuredClone(
-              snapshot.verificationClosureEffects[snapshot.verificationClosureEffects.length - 1],
-            ),
-          }),
+        : { verificationClosure: structuredClone(latestVerification) }),
     },
     verification: {
-      ...(state.serviceVerification === undefined
+      ...(verificationRefs.serviceVerificationRef === undefined
         ? {}
-        : { serviceVerificationRef: responseRef("RS-A-012", state.serviceVerification) }),
+        : { serviceVerificationRef: verificationRefs.serviceVerificationRef }),
       customerVerificationApplicability: scenario.customerVerificationApplicability,
-      ...(state.customerVerification === undefined
+      ...(verificationRefs.customerVerificationRef === undefined
         ? {}
-        : { customerVerificationRef: responseRef("RS-A-013", state.customerVerification) }),
-      ...(state.closureEligibility === undefined
+        : { customerVerificationRef: verificationRefs.customerVerificationRef }),
+      ...(verificationRefs.closureEligibilityRef === undefined
         ? {}
-        : { closureEligibilityRef: responseRef("RS-A-014", state.closureEligibility) }),
-      ...(state.closureDecision === undefined
+        : { closureEligibilityRef: verificationRefs.closureEligibilityRef }),
+      ...(verificationRefs.closureDecisionRef === undefined
         ? {}
-        : { closureDecisionRef: responseRef("RS-A-015", state.closureDecision) }),
+        : { closureDecisionRef: verificationRefs.closureDecisionRef }),
     },
     warnings: [
       "Execution is not Material Effect",
@@ -274,6 +279,22 @@ function allowedIntents(actionId: HitlTrial1HumanActionId, scenario: HitlTrial1R
   return ["EXECUTE_RECOVERY_ACTION"];
 }
 
-function responseRef(actionId: string, value: string): string {
-  return `HITL1:${actionId}:${value}`;
+function currentVerificationRefs(
+  snapshot: Awaited<ReturnType<LocalJsonlStore["load"]>>,
+): Pick<
+  HitlVerificationClosureRecord,
+  "serviceVerificationRef" | "customerVerificationRef" | "closureEligibilityRef" | "closureDecisionRef"
+> {
+  const refs: Pick<
+    HitlVerificationClosureRecord,
+    "serviceVerificationRef" | "customerVerificationRef" | "closureEligibilityRef" | "closureDecisionRef"
+  > = {};
+  for (const evaluation of snapshot.verificationClosureEffects) {
+    if (!isHitlVerificationClosureRecord(evaluation)) continue;
+    if (evaluation.serviceVerificationRef !== undefined) refs.serviceVerificationRef = evaluation.serviceVerificationRef;
+    if (evaluation.customerVerificationRef !== undefined) refs.customerVerificationRef = evaluation.customerVerificationRef;
+    if (evaluation.closureEligibilityRef !== undefined) refs.closureEligibilityRef = evaluation.closureEligibilityRef;
+    if (evaluation.closureDecisionRef !== undefined) refs.closureDecisionRef = evaluation.closureDecisionRef;
+  }
+  return refs;
 }
