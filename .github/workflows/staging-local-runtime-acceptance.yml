@@ -520,7 +520,7 @@ jobs:
           rm -f "$runtime_tmp"
           sudo -u appts-runtime test -r "$CONFIG_ROOT/runtime.json"
           sudo -u appts-runtime test -r "$CONFIG_ROOT/hitl-trial1-scenario.json"
-          node --input-type=module <<'NODE'
+          sudo -u appts-runtime node --input-type=module <<'NODE'
           import { readFile } from "node:fs/promises";
           const config = JSON.parse(await readFile("/etc/appts-restore-service/runtime.json", "utf8"));
           if (config.profile !== "HITL_TRIAL1_LOCAL_ONLY") throw new Error("HITL_PROFILE_NOT_ACTIVE");
