@@ -105,8 +105,9 @@ async function executeHitl(
       if (committed.normalizedEnvelope !== normalizeCommandEnvelope(envelope)) {
         throw new Error("IMPLEMENTATION_REPLAY_CONFLICT");
       }
-      const history = await requireCommittedHitlHistory(
+      const history = await requireCommittedHitlHistoryInScope(
         deps.repository,
+        deps.scenario.scopeBaseline.scopeRef,
         envelope.commandId,
         envelope.actionId as Exclude<HitlTrial1ActionId, "RS-A-022">,
       );
@@ -173,8 +174,9 @@ async function replayCommittedA14IfPresent(
   const committed = await deps.repository.findCommand(envelope.commandId);
   if (!committed) return null;
 
-  const history = await requireCommittedHitlHistory(
+  const history = await requireCommittedHitlHistoryInScope(
     deps.repository,
+    deps.scenario.scopeBaseline.scopeRef,
     envelope.commandId,
     HITL_ACTIONS.closureEligibility,
   );
@@ -508,9 +510,8 @@ export function buildIdentityCanonicalBytes(
 }
 
 async function recoverPendingA14(deps: RuntimeDeps, runtime: HitlTrial1Runtime): Promise<void> {
-  await assertAllCommittedA14HistoryCoherent(deps.repository);
-
   const scopeRef = deps.scenario.scopeBaseline.scopeRef;
+  await assertCommittedA14HistoryForScope(deps.repository, scopeRef);
   const snapshot = await deps.repository.load(scopeRef);
   const classification = classifyA14(snapshot, deps.scenario);
   if (!classification.ready) return;
@@ -519,8 +520,9 @@ async function recoverPendingA14(deps: RuntimeDeps, runtime: HitlTrial1Runtime):
 
   const existing = await deps.repository.findCommand(identity.commandId);
   if (existing) {
-    const history = await requireCommittedHitlHistory(
+    const history = await requireCommittedHitlHistoryInScope(
       deps.repository,
+      scopeRef,
       identity.commandId,
       HITL_ACTIONS.closureEligibility,
     );
@@ -824,22 +826,6 @@ function currentVerificationRefs(snapshot: ScopeSnapshot): {
   return refs;
 }
 
-async function assertAllCommittedA14HistoryCoherent(
-  repository: LocalJsonlStore,
-): Promise<void> {
-  const recovery = await repository.recoverRecords(
-    // LocalJsonlStore requires the admitted scope; recoverRecords is called again below with
-    // each seeded scope through its own history. Trial #1 has exactly one admitted scope.
-    // The first baseline is not exposed, so derive it from the one A14 history if present
-    // through the seeded store's replay surface is intentionally avoided here.
-    // This function is invoked from recoverPendingA14, which performs scoped verification next.
-    // No-op here; scoped proof follows in assertCommittedA14HistoryForScope.
-    // Type-safe placeholder is unreachable because the scoped function is the authority.
-    {} as ScopeRef,
-  ).catch(() => null);
-  void recovery;
-}
-
 async function assertCommittedA14HistoryForScope(
   repository: LocalJsonlStore,
   scopeRef: ScopeRef,
@@ -879,19 +865,6 @@ async function assertCommittedA14HistoryForScope(
       assertA14HistoryCoherent(history);
     }
   }
-}
-
-async function requireCommittedHitlHistory(
-  repository: LocalJsonlStore,
-  commandId: Ref,
-  actionId: Exclude<HitlTrial1ActionId, "RS-A-022">,
-): Promise<CommittedHitlHistory> {
-  // Trial #1 uses one scope; find the command's scope from the command identity by checking
-  // the admitted stream selected by the caller before this helper. The repository replay
-  // lookup cannot expose the batch, so scan the command's known scope through the record
-  // supplied by findCommand's envelope is not available here. The caller always uses the
-  // scenario scope and the dedicated helper below.
-  throw new Error(`HITL_INTERNAL_SCOPE_REQUIRED:${commandId}:${actionId}`);
 }
 
 async function requireCommittedHitlHistoryInScope(
