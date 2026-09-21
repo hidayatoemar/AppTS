@@ -230,45 +230,64 @@ jobs:
           printf '%s\n' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILpRJVkwh143CmmrMkQvgfNyRIbV964SsAYLZ3BlaGdh' > /tmp/appts-hostkey.pub
           actual="$(ssh-keygen -lf /tmp/appts-hostkey.pub -E sha256 | awk '{print $2}')"
           test "$actual" = 'SHA256:M0o8nYzf97+hK627/zeemfmiXF02eBjg7Ej5DUYITmw'
-      - name: Prepare bounded target-host acceptance script
+      - name: Prepare bounded HITL target-host acceptance script
         shell: bash
         run: |
+          set -euo pipefail
           cat > "$RUNNER_TEMP/staging-acceptance.mjs" <<'NODE'
           import { execFileSync } from "node:child_process";
 
           const base = "http://127.0.0.1:8080";
-          const marker = "PAYLOAD-DO-NOT-LOG-LOCAL-TRIAL";
-          const command = {
-            commandId: "CMD-STAGING-001",
-            actionId: "RS-A-022",
-            purposeRef: {
-              purpose: "RESTORE_SERVICE",
-              situationId: "SIT-STAGING-001",
-              compositionInstanceId: "COMP-STAGING-001",
-              startedFromBasisRef: "EV-INTAKE-STAGING"
-            },
-            scopeRef: {
-              situationId: "SIT-STAGING-001",
-              subjectType: "SERVICE",
-              subjectId: "SVC-STAGING-001"
-            },
-            requestedByActorOrMachineRef: "PERSON-STAGING-001",
-            actingContextRef: "CTX-STAGING-001",
-            expectedInputVersion: 0,
-            requestTime: "2026-09-19T00:00:00.000Z",
-            payloadRef: marker,
-            evidenceRefs: ["EV-DIAGNOSIS-STAGING"]
-          };
+          const secretMarker = "PAYLOAD-DO-NOT-LOG-LOCAL-TRIAL";
+          const expectedEvidenceRef = "EV-HITL1-GOV";
+
+          function responseClass(result) {
+            return {
+              status: result.status,
+              kind: typeof result.body?.kind === "string" ? result.body.kind : "NONE",
+              error: typeof result.body?.error === "string" ? result.body.error : "NONE"
+            };
+          }
+
+          function failClassified(label, result, expected) {
+            const actual = responseClass(result);
+            console.error(
+              `acceptance_failure label=${label} status=${actual.status} kind=${actual.kind} error=${actual.error} expected=${expected}`
+            );
+            throw new Error(`${label} failed`);
+          }
+
+          function expectOutcome(label, result, status, kind) {
+            if (result.status !== status || result.body?.kind !== kind) {
+              failClassified(label, result, `status:${status},kind:${kind}`);
+            }
+          }
+
+          function expectError(label, result, status, error) {
+            if (result.status !== status || result.body?.error !== error) {
+              failClassified(label, result, `status:${status},error:${error}`);
+            }
+          }
+
+          function assert(condition, label) {
+            if (!condition) throw new Error(label);
+          }
 
           async function waitReady() {
             for (let n = 0; n < 30; n += 1) {
               try {
-                const response = await fetch(base + "/readyz");
+                const response = await fetch(base + "/readyz", { cache: "no-store" });
                 if (response.ok) return;
               } catch {}
               await new Promise((resolve) => setTimeout(resolve, 500));
             }
             throw new Error("ready timeout");
+          }
+
+          async function getJson(path) {
+            const response = await fetch(base + path, { cache: "no-store" });
+            const body = await response.json();
+            return { status: response.status, body };
           }
 
           async function post(value) {
@@ -280,29 +299,170 @@ jobs:
             return { status: response.status, body: await response.json() };
           }
 
+          function selectedContext(view) {
+            return view.roleContexts.filter((item) => item.selected);
+          }
+
+          function purposeFrom(view) {
+            return {
+              purpose: "RESTORE_SERVICE",
+              situationId: view.scope.scopeRef.situationId,
+              compositionInstanceId: view.trial.scenarioId,
+              startedFromBasisRef: view.evidence.evidenceRefs[0]
+            };
+          }
+
+          function humanCommand(view, commandId, actionId, actingContextRef, payloadRef) {
+            return {
+              commandId,
+              actionId,
+              purposeRef: purposeFrom(view),
+              scopeRef: view.scope.scopeRef,
+              requestedByActorOrMachineRef: view.trial.personRef,
+              actingContextRef,
+              expectedInputVersion: view.scope.version,
+              requestTime: "2026-09-21T10:00:00.000Z",
+              payloadRef,
+              evidenceRefs: [...view.evidence.evidenceRefs]
+            };
+          }
+
           await waitReady();
-          const committed = await post(command);
-          if (committed.status !== 200 || committed.body.kind !== "COMMITTED") throw new Error("commit failed");
 
-          const replay = await post(command);
-          if (replay.status !== 200 || replay.body.kind !== "REPLAY") throw new Error("replay failed");
-          if (JSON.stringify(replay.body.execution) !== JSON.stringify(committed.body.execution)) throw new Error("execution replay mismatch");
-          if (JSON.stringify(replay.body.effects) !== JSON.stringify(committed.body.effects)) throw new Error("effect replay mismatch");
+          const trialPage = await fetch(base + "/trial-1", { cache: "no-store" });
+          assert(trialPage.status === 200, "trial page unavailable");
+          const trialHtml = await trialPage.text();
+          assert(!trialHtml.includes("HITL_TRIAL1_ORACLES"), "oracle symbol leaked to browser");
+          assert(!trialHtml.includes("expectedClosureEligibility"), "oracle expectation leaked to browser");
 
-          const conflict = await post({ ...command, expectedInputVersion: 1 });
-          if (conflict.status !== 409 || conflict.body.error !== "IMPLEMENTATION_REPLAY_CONFLICT") throw new Error("conflict failed");
+          const initialResponse = await getJson("/trial-1/operator-view?actingContextRef=CTX-HITL1-RECOVERY");
+          assert(initialResponse.status === 200, "initial operator view unavailable");
+          const initial = initialResponse.body;
+          assert(initial.infrastructure?.syntheticTrial === true, "synthetic trial marker missing");
+          assert(initial.infrastructure?.loopbackOnly === true, "loopback marker missing");
+          assert(initial.trial?.trialId === "TRIAL-LOCAL-001", "trial id mismatch");
+          assert(initial.trial?.scenarioId === "S01_SUCCESS_REQUIRED", "scenario id mismatch");
+          assert(initial.trial?.personRef === "PERSON-STAGING-001", "single human mismatch");
+          assert(initial.scope?.version === 0, "initial version mismatch");
+          assert(initial.roleContexts?.length === 4, "role-context cardinality mismatch");
+          assert(selectedContext(initial).length === 1 && selectedContext(initial)[0].actingContextRef === "CTX-HITL1-RECOVERY", "recovery context not selected");
+          assert(initial.actions?.["RS-A-014"]?.mode === "DETERMINISTIC_MACHINE", "A14 machine projection missing");
+          assert(!JSON.stringify(initial).includes("expectedClosureEligibility"), "oracle expectation leaked to operator view");
+
+          for (const contextRef of [
+            "CTX-HITL1-SERVICE-VERIFICATION",
+            "CTX-HITL1-CUSTOMER-VERIFICATION",
+            "CTX-HITL1-CLOSURE-DECISION"
+          ]) {
+            const roleView = await getJson(`/trial-1/operator-view?actingContextRef=${encodeURIComponent(contextRef)}`);
+            assert(roleView.status === 200, "role view unavailable");
+            assert(roleView.body.scope.version === 0, "role switch mutated version");
+            assert(selectedContext(roleView.body).length === 1 && selectedContext(roleView.body)[0].actingContextRef === contextRef, "role selection mismatch");
+            assert(roleView.body.responsibility.responsibilityRef === initial.responsibility.responsibilityRef, "role switch changed responsibility");
+          }
+
+          const recovery = humanCommand(
+            initial,
+            "CMD-STAGING-001",
+            "RS-A-022",
+            "CTX-HITL1-RECOVERY",
+            secretMarker
+          );
+          const recoveryCommit = await post(recovery);
+          expectOutcome("recovery_commit", recoveryCommit, 200, "COMMITTED");
+          assert(recoveryCommit.body.effects?.some((effect) => effect.materialEffectEstablished === true), "recovery material effect missing");
+
+          const recoveryReplay = await post(recovery);
+          expectOutcome("recovery_replay", recoveryReplay, 200, "REPLAY");
+          assert(JSON.stringify(recoveryReplay.body.execution) === JSON.stringify(recoveryCommit.body.execution), "recovery replay execution mismatch");
+          assert(JSON.stringify(recoveryReplay.body.effects) === JSON.stringify(recoveryCommit.body.effects), "recovery replay effect mismatch");
+
+          const recoveryConflict = await post({ ...recovery, expectedInputVersion: 1 });
+          expectError("recovery_conflict", recoveryConflict, 409, "IMPLEMENTATION_REPLAY_CONFLICT");
+
+          const serviceViewResponse = await getJson("/trial-1/operator-view?actingContextRef=CTX-HITL1-SERVICE-VERIFICATION");
+          assert(serviceViewResponse.status === 200, "service view unavailable");
+          const serviceView = serviceViewResponse.body;
+          assert(serviceView.scope.version === 1, "post-recovery version mismatch");
+
+          const a12 = humanCommand(
+            serviceView,
+            "CMD-HITL1-STAGING-A12-001",
+            "RS-A-012",
+            "CTX-HITL1-SERVICE-VERIFICATION",
+            "VERIFIED_OK"
+          );
+          const a12Commit = await post(a12);
+          expectOutcome("a12_commit", a12Commit, 200, "COMMITTED");
+          const a12Replay = await post(a12);
+          expectOutcome("a12_replay", a12Replay, 200, "REPLAY");
+
+          const customerViewResponse = await getJson("/trial-1/operator-view?actingContextRef=CTX-HITL1-CUSTOMER-VERIFICATION");
+          assert(customerViewResponse.status === 200, "customer view unavailable");
+          const customerView = customerViewResponse.body;
+          assert(customerView.scope.version === 2, "post-A12 version mismatch");
+          assert(customerView.verification.serviceVerificationRef === "HITL1:SERVICE_VERIFICATION:VERIFIED_OK", "service verification missing");
+
+          const a13 = humanCommand(
+            customerView,
+            "CMD-HITL1-STAGING-A13-001",
+            "RS-A-013",
+            "CTX-HITL1-CUSTOMER-VERIFICATION",
+            "CONFIRMED_OK"
+          );
+          const a13Commit = await post(a13);
+          expectOutcome("a13_commit", a13Commit, 200, "COMMITTED");
+
+          const closureViewResponse = await getJson("/trial-1/operator-view?actingContextRef=CTX-HITL1-CLOSURE-DECISION");
+          assert(closureViewResponse.status === 200, "closure view unavailable");
+          const closureView = closureViewResponse.body;
+          assert(closureView.scope.version === 4, "A14 exact-once version mismatch");
+          assert(closureView.verification.customerVerificationRef === "HITL1:CUSTOMER_VERIFICATION:CONFIRMED_OK", "customer verification missing");
+          assert(closureView.verification.closureEligibilityRef === "HITL1:CLOSURE_ELIGIBILITY:ELIGIBLE", "closure eligibility missing");
+          assert(closureView.actions?.["RS-A-014"]?.mode === "DETERMINISTIC_MACHINE", "A14 projection changed");
+
+          const a15 = humanCommand(
+            closureView,
+            "CMD-HITL1-STAGING-A15-001",
+            "RS-A-015",
+            "CTX-HITL1-CLOSURE-DECISION",
+            "CLOSED"
+          );
+          const a15Commit = await post(a15);
+          expectOutcome("a15_commit", a15Commit, 200, "COMMITTED");
+
+          const finalBeforeRestartResponse = await getJson("/trial-1/operator-view?actingContextRef=CTX-HITL1-CLOSURE-DECISION");
+          assert(finalBeforeRestartResponse.status === 200, "final view unavailable");
+          const finalBeforeRestart = finalBeforeRestartResponse.body;
+          assert(finalBeforeRestart.scope.version === 5, "final version mismatch");
+          assert(finalBeforeRestart.verification.closureDecisionRef === "HITL1:CLOSURE_DECISION:CLOSED", "explicit closure decision missing");
+
+          const readOnlyRefresh = await getJson("/trial-1/operator-view?actingContextRef=CTX-HITL1-RECOVERY");
+          assert(readOnlyRefresh.status === 200 && readOnlyRefresh.body.scope.version === 5, "GET mutated authoritative state");
 
           execFileSync("sudo", ["systemctl", "restart", "appts-restore-service-local.service"], { stdio: "inherit" });
           await waitReady();
 
-          const postRestartReplay = await post(command);
-          if (postRestartReplay.status !== 200 || postRestartReplay.body.kind !== "REPLAY") throw new Error("post-restart replay failed");
-          if (JSON.stringify(postRestartReplay.body.execution) !== JSON.stringify(committed.body.execution)) throw new Error("post-restart execution mismatch");
-          if (JSON.stringify(postRestartReplay.body.effects) !== JSON.stringify(committed.body.effects)) throw new Error("post-restart effect mismatch");
+          const afterRestartResponse = await getJson("/trial-1/operator-view?actingContextRef=CTX-HITL1-CLOSURE-DECISION");
+          assert(afterRestartResponse.status === 200, "post-restart view unavailable");
+          const afterRestart = afterRestartResponse.body;
+          assert(afterRestart.scope.version === 5, "restart changed authoritative version");
+          assert(afterRestart.verification.closureEligibilityRef === "HITL1:CLOSURE_ELIGIBILITY:ELIGIBLE", "eligibility not durable");
+          assert(afterRestart.verification.closureDecisionRef === "HITL1:CLOSURE_DECISION:CLOSED", "closure decision not durable");
 
-          console.log("staging_local_runtime_command_restart_replay=PASS");
+          const postRestartReplay = await post(a15);
+          expectOutcome("a15_post_restart_replay", postRestartReplay, 200, "REPLAY");
+          assert(JSON.stringify(postRestartReplay.body.execution) === JSON.stringify(a15Commit.body.execution), "post-restart execution replay mismatch");
+
+          const afterReplayResponse = await getJson("/trial-1/operator-view?actingContextRef=CTX-HITL1-CLOSURE-DECISION");
+          assert(afterReplayResponse.status === 200 && afterReplayResponse.body.scope.version === 5, "replay created second business action");
+
+          console.log("staging_hitl_trial1_success_path=PASS");
+          console.log("staging_hitl_trial1_role_switch_read_only=PASS");
+          console.log("staging_hitl_trial1_replay_restart=PASS");
+          console.log("staging_hitl_trial1_oracle_isolation=PASS");
           NODE
-      - name: Transfer, provision, and execute bounded acceptance
+      - name: Transfer, activate HITL profile, and execute bounded acceptance
         shell: bash
         run: |
           set -euo pipefail
@@ -317,8 +477,67 @@ jobs:
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
             -o ConnectTimeout=12
           )
-          scp "${SSH_OPTS[@]}"             infra/staging/provision-local-runtime.sh             "$artifact"             "$RUNNER_TEMP/gate-a.tar.gz"             "$RUNNER_TEMP/gate-b.tar.gz"             "$RUNNER_TEMP/staging-acceptance.mjs"             appts-mcr@103.127.99.11:/tmp/
-          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11             "bash /tmp/provision-local-runtime.sh '$CANDIDATE_SHA' '/tmp/local-runtime-$CANDIDATE_SHA.tar.gz' '$artifact_sha'"
+          scp "${SSH_OPTS[@]}" \
+            infra/staging/provision-local-runtime.sh \
+            "$artifact" \
+            "$RUNNER_TEMP/gate-a.tar.gz" \
+            "$RUNNER_TEMP/gate-b.tar.gz" \
+            "$RUNNER_TEMP/staging-acceptance.mjs" \
+            appts-mcr@103.127.99.11:/tmp/
+          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 \
+            "bash /tmp/provision-local-runtime.sh '$CANDIDATE_SHA' '/tmp/local-runtime-$CANDIDATE_SHA.tar.gz' '$artifact_sha'"
+          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 'bash -s' <<'REMOTE_HITL_PROFILE'
+          set -euo pipefail
+          CONFIG_ROOT=/etc/appts-restore-service
+          RELEASE=/opt/appts-restore-service/current
+          test -f "$RELEASE/infra/staging/hitl-trial1-scenario.example.json"
+          sudo install -o root -g appts-runtime -m 0640 \
+            "$RELEASE/infra/staging/hitl-trial1-scenario.example.json" \
+            "$CONFIG_ROOT/hitl-trial1-scenario.json"
+          runtime_tmp="$(mktemp)"
+          cat > "$runtime_tmp" <<'JSON'
+          {
+            "profile": "HITL_TRIAL1_LOCAL_ONLY",
+            "bindAddress": "127.0.0.1",
+            "port": 8080,
+            "dataDir": "/var/lib/appts-restore-service/runtime",
+            "trialFixturePath": "/etc/appts-restore-service/synthetic-trial-fixture.json",
+            "hitlScenarioPath": "/etc/appts-restore-service/hitl-trial1-scenario.json"
+          }
+          JSON
+          sudo install -o root -g appts-runtime -m 0640 "$runtime_tmp" "$CONFIG_ROOT/runtime.json"
+          rm -f "$runtime_tmp"
+          sudo -u appts-runtime test -r "$CONFIG_ROOT/runtime.json"
+          sudo -u appts-runtime test -r "$CONFIG_ROOT/hitl-trial1-scenario.json"
+          node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+          const config = JSON.parse(await readFile("/etc/appts-restore-service/runtime.json", "utf8"));
+          if (config.profile !== "HITL_TRIAL1_LOCAL_ONLY") throw new Error("HITL_PROFILE_NOT_ACTIVE");
+          if (config.hitlScenarioPath !== "/etc/appts-restore-service/hitl-trial1-scenario.json") throw new Error("HITL_SCENARIO_PATH_MISMATCH");
+          if (config.bindAddress !== "127.0.0.1" || config.port !== 8080) throw new Error("HITL_LOOPBACK_CONFIG_MISMATCH");
+          console.log("hitl_runtime_profile_config=PASS");
+          NODE
+          sudo systemctl restart appts-restore-service-local.service
+          sudo systemctl is-active --quiet appts-restore-service-local.service
+          node --input-type=module <<'NODE'
+          for (let attempt = 0; attempt < 30; attempt += 1) {
+            try {
+              const health = await fetch("http://127.0.0.1:8080/healthz");
+              const ready = await fetch("http://127.0.0.1:8080/readyz");
+              if (health.ok && ready.ok) {
+                console.log("hitl_runtime_readiness=PASS");
+                process.exit(0);
+              }
+            } catch {}
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+          throw new Error("HITL_RUNTIME_READINESS_TIMEOUT");
+          NODE
+          app_listener=$(ss -lntH | awk '{print $4}' | grep -E '(^|])?:8080$' || true)
+          test "$app_listener" = '127.0.0.1:8080'
+          test -z "$(ss -lntH | awk '{print $4}' | grep -E '(^|:)(80|443)$' || true)"
+          echo hitl_runtime_profile_activation=PASS
+          REMOTE_HITL_PROFILE
           ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 'bash -s' <<'REMOTE_ACCEPTANCE'
           set -euo pipefail
           test "$(node -p 'process.versions.node.split(".")[0]')" = '22'
@@ -348,7 +567,9 @@ jobs:
           test "$app_listener" = '127.0.0.1:8080'
           test -z "$(ss -lntH | awk '{print $4}' | grep -E '(^|:)(80|443)$' || true)"
           ! sudo journalctl -u appts-restore-service-local.service --no-pager | grep -F 'PAYLOAD-DO-NOT-LOG-LOCAL-TRIAL'
-          ! sudo journalctl -u appts-restore-service-local.service --no-pager | grep -F 'EV-DIAGNOSIS-STAGING'
+          ! sudo journalctl -u appts-restore-service-local.service --no-pager | grep -F 'EV-HITL1-GOV'
           echo target_host_three_gate_acceptance=PASS
+          echo target_host_hitl_trial1_acceptance=PASS
           REMOTE_ACCEPTANCE
-          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11             "rm -f /tmp/provision-local-runtime.sh /tmp/local-runtime-$CANDIDATE_SHA.tar.gz /tmp/gate-a.tar.gz /tmp/gate-b.tar.gz /tmp/staging-acceptance.mjs /tmp/target-gate-a.tap /tmp/target-gate-b.tap /tmp/target-gate-c.tap"
+          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 \
+            "rm -f /tmp/provision-local-runtime.sh /tmp/local-runtime-$CANDIDATE_SHA.tar.gz /tmp/gate-a.tar.gz /tmp/gate-b.tar.gz /tmp/staging-acceptance.mjs /tmp/target-gate-a.tap /tmp/target-gate-b.tap /tmp/target-gate-c.tap"
