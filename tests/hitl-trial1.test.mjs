@@ -14,6 +14,7 @@ import {
   classifyA14,
   createHitlTrial1Runtime,
   readHitlTrialState,
+  sha256Hex,
 } from "../dist/src/staging/hitl-trial1-runtime.js";
 import { createLocalRuntimeComposition } from "../dist/src/staging/runtime-composition.js";
 import { createLocalBoundary } from "../dist/src/staging/local-boundary.js";
@@ -189,11 +190,60 @@ async function freePort() {
 test("HITL-T01 exactly one synthetic human owns all admitted human contexts", async () => {
   const scenario = validateHitlTrial1ScenarioObject(clone(HITL_TRIAL1_SCENARIOS.S01_SUCCESS_REQUIRED));
   assert.equal(new Set(scenario.actingContexts.map((item) => item.candidate.personRef)).size, 1);
+  assert.equal(new Set(scenario.scopeBaseline.actingContextCandidates.map((item) => item.personRef)).size, 1);
+  assert.equal(scenario.scopeBaseline.actingContextCandidates[0].personRef, scenario.personRef);
   assert.equal(scenario.actingContexts.length, 4);
   assert.deepEqual(
     scenario.actingContexts.map((item) => item.actionId).sort(),
     ["RS-A-012", "RS-A-013", "RS-A-015", "RS-A-022"],
   );
+
+  const secondPerson = clone(HITL_TRIAL1_SCENARIOS.S01_SUCCESS_REQUIRED);
+  secondPerson.scopeBaseline.actingContextCandidates[0].personRef = "PERSON-HITL1-SECOND";
+  assert.throws(
+    () => validateHitlTrial1ScenarioObject(secondPerson),
+    /HITL_SINGLE_PERSON_BASELINE_VIOLATION/,
+  );
+
+  const duplicateContext = clone(HITL_TRIAL1_SCENARIOS.S01_SUCCESS_REQUIRED);
+  duplicateContext.scopeBaseline.actingContextCandidates.push(
+    clone(duplicateContext.scopeBaseline.actingContextCandidates[0]),
+  );
+  assert.throws(
+    () => validateHitlTrial1ScenarioObject(duplicateContext),
+    /HITL_DUPLICATE_BASELINE_CONTEXT_REF/,
+  );
+
+  for (const mutate of [
+    (candidate) => { candidate.responsibilityRef = "RESP-HITL1-MISMATCH"; },
+    (candidate) => { candidate.authorityBasisRef = "AUTH-HITL1-MISMATCH"; },
+    (candidate) => { candidate.scopeRef.subjectId = "SVC-HITL1-MISMATCH"; },
+  ]) {
+    const mismatch = clone(HITL_TRIAL1_SCENARIOS.S01_SUCCESS_REQUIRED);
+    const recoveryBinding = mismatch.actingContexts.find((item) => item.actionId === "RS-A-022");
+    const recoveryBaseline = mismatch.scopeBaseline.actingContextCandidates.find(
+      (item) => item.contextRef === recoveryBinding.actingContextRef,
+    );
+    assert.ok(recoveryBaseline);
+    mutate(recoveryBaseline);
+    assert.throws(
+      () => validateHitlTrial1ScenarioObject(mismatch),
+      /HITL_BASELINE_BINDING_MISMATCH/,
+    );
+  }
+
+  const rejectedBeforeRuntime = clone(HITL_TRIAL1_SCENARIOS.S01_SUCCESS_REQUIRED);
+  const recoveryBinding = rejectedBeforeRuntime.actingContexts.find((item) => item.actionId === "RS-A-022");
+  const recoveryBaseline = rejectedBeforeRuntime.scopeBaseline.actingContextCandidates.find(
+    (item) => item.contextRef === recoveryBinding.actingContextRef,
+  );
+  recoveryBaseline.personRef = "PERSON-HITL1-SECOND";
+  let runtimeAdmissionReached = false;
+  assert.throws(() => {
+    validateHitlTrial1ScenarioObject(rejectedBeforeRuntime);
+    runtimeAdmissionReached = true;
+  }, /HITL_SINGLE_PERSON_BASELINE_VIOLATION/);
+  assert.equal(runtimeAdmissionReached, false);
 });
 
 test("HITL-T02 Role selection changes no handover or responsibility truth", async () => {
@@ -621,6 +671,18 @@ test("HITL-T21 crash after classifiable basis recovers exactly one stable A14 is
     assert.equal(a14Executions.length, 1);
     assert.equal(a14Executions[0].responseRef, a14Records[0].recordRef);
     assert.equal(a14Records[0].canonicalA14IdentityBytes, pendingIdentity.canonicalBytes);
+    assert.equal(
+      a14Records[0].canonicalA14GoverningBasisVersion,
+      a14Records[0].determiningExpectedVersion,
+    );
+    assert.equal(
+      a14Records[0].canonicalA14HistoricalBasis.governingBasisVersion,
+      a14Records[0].determiningExpectedVersion,
+    );
+    assert.equal(
+      JSON.stringify(a14Records[0].canonicalA14HistoricalBasis),
+      a14Records[0].canonicalA14IdentityBytes,
+    );
 
     const postRecoveryHitl = createHitlTrial1Runtime({
       repository: restarted.repository,
@@ -641,26 +703,58 @@ test("HITL-T21 crash after classifiable basis recovers exactly one stable A14 is
     assert.equal((await secondRestart.repository.load(scenario.scopeBaseline.scopeRef)).version, beforeRead);
 
     const originalRecover = secondRestart.repository.recoverRecords.bind(secondRestart.repository);
-    secondRestart.repository.recoverRecords = async (scopeRef) => {
-      const result = clone(await originalRecover(scopeRef));
-      const committedA14 = result.records.find(
-        (record) => record.batch.commandReplayIdentity?.commandId === pendingIdentity.commandId,
+    const expectCorruptA14History = async (mutate) => {
+      secondRestart.repository.recoverRecords = async (scopeRef) => {
+        const result = clone(await originalRecover(scopeRef));
+        const committedA14 = result.records.find(
+          (record) => record.batch.commandReplayIdentity?.commandId === pendingIdentity.commandId,
+        );
+        assert.ok(committedA14);
+        const verification = committedA14.batch.verificationClosureEffects.find(
+          (item) => item.actionId === "RS-A-014",
+        );
+        assert.ok(verification);
+        mutate({ committedA14, verification });
+        return result;
+      };
+      const corruptRuntime = createHitlTrial1Runtime({
+        repository: secondRestart.repository,
+        scenario,
+        clock: { now: () => "2026-09-21T00:00:32.000Z" },
+        ids: { next: (kind) => `${kind}-CORRUPT` },
+      });
+      await assert.rejects(
+        () => corruptRuntime.recoverPendingA14(),
+        /HITL_AUTHORITATIVE_HISTORY_CORRUPTION/,
       );
-      assert.ok(committedA14);
-      committedA14.batch.verificationClosureEffects = [];
-      return result;
+      secondRestart.repository.recoverRecords = originalRecover;
     };
-    const corruptRuntime = createHitlTrial1Runtime({
-      repository: secondRestart.repository,
-      scenario,
-      clock: { now: () => "2026-09-21T00:00:32.000Z" },
-      ids: { next: (kind) => `${kind}-CORRUPT` },
+
+    await expectCorruptA14History(({ committedA14 }) => {
+      committedA14.batch.verificationClosureEffects = [];
     });
-    await assert.rejects(
-      () => corruptRuntime.recoverPendingA14(),
-      /HITL_AUTHORITATIVE_HISTORY_CORRUPTION/,
-    );
-    secondRestart.repository.recoverRecords = originalRecover;
+
+    await expectCorruptA14History(({ verification }) => {
+      verification.canonicalA14GoverningBasisVersion += 1;
+    });
+
+    await expectCorruptA14History(({ verification }) => {
+      const fakeCanonicalBasis = JSON.parse(verification.canonicalA14IdentityBytes);
+      fakeCanonicalBasis.scenarioId = "S01-HISTORICALLY-WRONG";
+      const fakeBytes = JSON.stringify(fakeCanonicalBasis);
+      const fakeDigest = sha256Hex(fakeBytes);
+      assert.equal(sha256Hex(fakeBytes), fakeDigest);
+      verification.canonicalA14IdentityBytes = fakeBytes;
+      verification.canonicalA14IdentityDigest = fakeDigest;
+    });
+
+    await expectCorruptA14History(({ verification }) => {
+      verification.determiningEvidenceRefs = ["EV-HITL1-NOT-DETERMINING"];
+    });
+
+    await expectCorruptA14History(({ verification }) => {
+      verification.governingResidualObligationRefs = ["OBL-HITL1-NOT-COMMITTED"];
+    });
 
     const changed = clone(scenario);
     changed.customerVerificationApplicabilityPolicyBasisRef = "POLICY-HITL1-CHANGED-WITHOUT-VERSION";
