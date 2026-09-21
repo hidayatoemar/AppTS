@@ -83,6 +83,40 @@ export interface HitlTrial1RuntimeScenario {
   residualObligations: readonly HitlTrial1ResidualObligationPolicy[];
 }
 
+export interface HitlA14HistoricalBasis {
+  trialId: Ref;
+  scenarioId: Ref;
+  scope: {
+    situationId: Ref;
+    subjectType: string;
+    subjectId: Ref;
+    parentScopeRef: Ref | null;
+    relationRef: Ref | null;
+  };
+  governingBasisVersion: number;
+  serviceVerificationRef: Ref | null;
+  customerVerificationApplicability: CustomerVerificationApplicability;
+  customerVerificationApplicabilityPolicyBasisRef: Ref;
+  customerVerificationRef: Ref | null;
+  evidenceBasisRef: Ref;
+  governingPolicyBasisRefs: readonly Ref[];
+  governingEvidenceBasis: readonly {
+    evidenceId: Ref;
+    payloadOrRecordRef: Ref;
+    currentnessStatus: Currentness["status"];
+    currentnessBasisRef: Ref | null;
+    evidenceIntegrityConflictRef: Ref | null;
+    integritySufficient: boolean;
+    integrityConflict: boolean;
+    integrityEvidenceRefs: readonly Ref[];
+  }[];
+  residualObligationBasis: readonly {
+    obligationRef: Ref;
+    closureBlocking: boolean;
+    policyBasisRef: Ref;
+  }[];
+}
+
 export interface HitlVerificationClosureRecord extends VerificationClosureEvaluation {
   recordKind: "HITL1_VERIFICATION_CLOSURE";
   recordRef: Ref;
@@ -99,6 +133,7 @@ export interface HitlVerificationClosureRecord extends VerificationClosureEvalua
   canonicalA14IdentityDigest?: string;
   canonicalA14IdentityBytes?: string;
   canonicalA14GoverningBasisVersion?: number;
+  canonicalA14HistoricalBasis?: HitlA14HistoricalBasis;
 }
 
 export interface TrialActionProjection {
@@ -261,9 +296,21 @@ export function validateHitlTrial1ScenarioObject(value: unknown): HitlTrial1Runt
     if (!residualPolicyRefs.has(obligationRef)) throw new Error("HITL_RESIDUAL_POLICY_MISSING");
   }
 
-  const candidateRefs = new Set(scopeBaseline.actingContextCandidates.map((candidate) => candidate.contextRef));
+  const baselineCandidates = new Map(
+    scopeBaseline.actingContextCandidates.map((candidate) => [candidate.contextRef, candidate] as const),
+  );
   for (const binding of actingContexts) {
-    if (!candidateRefs.has(binding.candidate.contextRef)) throw new Error("HITL_CONTEXT_NOT_IN_SCOPE_BASELINE");
+    const baselineCandidate = baselineCandidates.get(binding.candidate.contextRef);
+    if (!baselineCandidate) throw new Error("HITL_CONTEXT_NOT_IN_SCOPE_BASELINE");
+    if (
+      baselineCandidate.contextRef !== binding.candidate.contextRef ||
+      baselineCandidate.personRef !== binding.candidate.personRef ||
+      baselineCandidate.responsibilityRef !== binding.candidate.responsibilityRef ||
+      baselineCandidate.authorityBasisRef !== binding.candidate.authorityBasisRef ||
+      scopeIdentity(baselineCandidate.scopeRef) !== scopeIdentity(binding.candidate.scopeRef)
+    ) {
+      throw new Error("HITL_BASELINE_BINDING_MISMATCH");
+    }
   }
 
   return {
@@ -293,6 +340,14 @@ function validateScopeBaseline(value: unknown, personRef: string, responsibility
   if (responsibility.holderPersonRef !== personRef) throw new Error("HITL_RESPONSIBILITY_PERSON_MISMATCH");
   if (!Array.isArray(record.actingContextCandidates) || record.actingContextCandidates.length === 0) {
     throw new Error("HITL_ACTING_CONTEXT_CANDIDATES_REQUIRED");
+  }
+  const baselineContextRefs = new Set<string>();
+  for (const entry of record.actingContextCandidates) {
+    const candidate = asRecord(entry, "INVALID_HITL_BASELINE_ACTING_CONTEXT_CANDIDATE");
+    const contextRef = nonEmpty(candidate.contextRef, "INVALID_HITL_BASELINE_CONTEXT_REF");
+    if (baselineContextRefs.has(contextRef)) throw new Error("HITL_DUPLICATE_BASELINE_CONTEXT_REF");
+    baselineContextRefs.add(contextRef);
+    if (candidate.personRef !== personRef) throw new Error("HITL_SINGLE_PERSON_BASELINE_VIOLATION");
   }
   for (const key of [
     "actionExecutions",
