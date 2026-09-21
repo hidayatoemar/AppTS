@@ -584,7 +584,7 @@ test("HITL-T21 crash after classifiable basis recovers exactly one stable A14 is
     const originalAppend = first.repository.append.bind(first.repository);
     first.repository.append = async (expectedVersion, batch) => {
       const result = await originalAppend(expectedVersion, batch);
-      if (batch.actionExecutions[0]?.responseRef?.startsWith("HITL1:RS-A-013:")) {
+      if (batch.verificationClosureEffects.some((item) => item.actionId === "RS-A-013")) {
         throw new Error("SIMULATED_CRASH_AFTER_A13_COMMIT");
       }
       return result;
@@ -594,6 +594,7 @@ test("HITL-T21 crash after classifiable basis recovers exactly one stable A14 is
       /SIMULATED_CRASH_AFTER_A13_COMMIT/,
     );
     first.repository.append = originalAppend;
+
     const crashed = await first.repository.load(scenario.scopeBaseline.scopeRef);
     assert.equal(crashed.version, 3);
     assert.equal(readHitlTrialState(crashed).closureEligibility, undefined);
@@ -611,8 +612,15 @@ test("HITL-T21 crash after classifiable basis recovers exactly one stable A14 is
     const recovered = await restarted.repository.load(scenario.scopeBaseline.scopeRef);
     assert.equal(recovered.version, 4);
     assert.equal(readHitlTrialState(recovered).closureEligibility, "ELIGIBLE");
-    const a14Executions = recovered.actionExecutions.filter((item) => item.responseRef?.startsWith("HITL1:RS-A-014:"));
+
+    const a14Records = recovered.verificationClosureEffects.filter((item) => item.actionId === "RS-A-014");
+    assert.equal(a14Records.length, 1);
+    const a14Executions = recovered.actionExecutions.filter(
+      (item) => item.commandId === a14Records[0].determiningCommandId,
+    );
     assert.equal(a14Executions.length, 1);
+    assert.equal(a14Executions[0].responseRef, a14Records[0].recordRef);
+    assert.equal(a14Records[0].canonicalA14IdentityBytes, pendingIdentity.canonicalBytes);
 
     const postRecoveryHitl = createHitlTrial1Runtime({
       repository: restarted.repository,
@@ -631,6 +639,28 @@ test("HITL-T21 crash after classifiable basis recovers exactly one stable A14 is
     const beforeRead = afterSecond.version;
     await secondRestart.buildOperatorView("CTX-HITL1-CLOSURE-DECISION");
     assert.equal((await secondRestart.repository.load(scenario.scopeBaseline.scopeRef)).version, beforeRead);
+
+    const originalRecover = secondRestart.repository.recoverRecords.bind(secondRestart.repository);
+    secondRestart.repository.recoverRecords = async (scopeRef) => {
+      const result = clone(await originalRecover(scopeRef));
+      const committedA14 = result.records.find(
+        (record) => record.batch.commandReplayIdentity?.commandId === pendingIdentity.commandId,
+      );
+      assert.ok(committedA14);
+      committedA14.batch.verificationClosureEffects = [];
+      return result;
+    };
+    const corruptRuntime = createHitlTrial1Runtime({
+      repository: secondRestart.repository,
+      scenario,
+      clock: { now: () => "2026-09-21T00:00:32.000Z" },
+      ids: { next: (kind) => `${kind}-CORRUPT` },
+    });
+    await assert.rejects(
+      () => corruptRuntime.recoverPendingA14(),
+      /A14_AUTHORITATIVE_HISTORY_CORRUPTION/,
+    );
+    secondRestart.repository.recoverRecords = originalRecover;
 
     const changed = clone(scenario);
     changed.customerVerificationApplicabilityPolicyBasisRef = "POLICY-HITL1-CHANGED-WITHOUT-VERSION";
