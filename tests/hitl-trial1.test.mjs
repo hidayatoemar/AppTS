@@ -99,7 +99,41 @@ function humanCommand(scenario, actionId, intent, expectedInputVersion, commandI
   };
 }
 
-function actionExecution(actionId, value, commandId = `CMD-${actionId}-STATE`) {
+function semanticRef(actionId, value) {
+  if (actionId === "RS-A-012") return `HITL1:SERVICE_VERIFICATION:${value}`;
+  if (actionId === "RS-A-013") return `HITL1:CUSTOMER_VERIFICATION:${value}`;
+  if (actionId === "RS-A-014") return `HITL1:CLOSURE_ELIGIBILITY:${value}`;
+  return `HITL1:CLOSURE_DECISION:${value}`;
+}
+
+function verificationRecord(scenario, actionId, value, commandId, index, residualObligationRefs = []) {
+  const record = {
+    recordKind: "HITL1_VERIFICATION_CLOSURE",
+    recordRef: `HITL1:VC:${actionId}:${commandId}`,
+    actionId,
+    determiningCommandId: commandId,
+    determiningExpectedVersion: index,
+    determiningTime: "2026-09-21T00:00:10.000Z",
+    determiningEvidenceRefs: ["EV-HITL1-GOV"],
+    governingResidualObligationRefs: [...residualObligationRefs],
+    scopeRef: clone(scenario.scopeBaseline.scopeRef),
+    workCompleted: true,
+    materialRestorationEstablished: true,
+    serviceVerified: actionId === "RS-A-012" && value === "VERIFIED_OK",
+    customerVerified: actionId === "RS-A-013" && value === "CONFIRMED_OK",
+    closureEligible: actionId === "RS-A-014" && value === "ELIGIBLE",
+    closureDecisionAuthorized: actionId === "RS-A-015" && value === "CLOSED",
+    residualObligationRefs: [...residualObligationRefs],
+    prohibitedInferences: [],
+  };
+  if (actionId === "RS-A-012") record.serviceVerificationRef = semanticRef(actionId, value);
+  if (actionId === "RS-A-013") record.customerVerificationRef = semanticRef(actionId, value);
+  if (actionId === "RS-A-014") record.closureEligibilityRef = semanticRef(actionId, value);
+  if (actionId === "RS-A-015") record.closureDecisionRef = semanticRef(actionId, value);
+  return record;
+}
+
+function actionExecution(actionId, commandId = `CMD-${actionId}-STATE`) {
   return {
     commandId,
     accepted: true,
@@ -107,7 +141,7 @@ function actionExecution(actionId, value, commandId = `CMD-${actionId}-STATE`) {
     executionResult: actionId === "RS-A-014" ? "EVALUATED" : "RECORDED",
     executorRef: actionId === "RS-A-014" ? "MACHINE-HITL1-RS-A014" : "PERSON-HITL1-001",
     executionTime: "2026-09-21T00:00:10.000Z",
-    responseRef: `HITL1:${actionId}:${value}`,
+    responseRef: `HITL1:VC:${actionId}:${commandId}`,
     evidenceRefs: ["EV-HITL1-GOV"],
     provenance: { sourceRefs: ["EV-HITL1-GOV"], chainRefs: [] },
     uncertaintyFlag: false,
@@ -116,7 +150,11 @@ function actionExecution(actionId, value, commandId = `CMD-${actionId}-STATE`) {
 
 function snapshotWithState(scenario, entries, residualObligationRefs = undefined) {
   const snapshot = clone(scenario.scopeBaseline);
-  snapshot.actionExecutions = entries.map(([action, value]) => actionExecution(action, value));
+  const residuals = residualObligationRefs ?? snapshot.residualObligationRefs;
+  snapshot.actionExecutions = entries.map(([action], index) => actionExecution(action, `CMD-${action}-STATE-${index}`));
+  snapshot.verificationClosureEffects = entries.map(([action, value], index) =>
+    verificationRecord(scenario, action, value, `CMD-${action}-STATE-${index}`, index, residuals),
+  );
   if (residualObligationRefs) snapshot.residualObligationRefs = [...residualObligationRefs];
   snapshot.version = entries.length;
   return snapshot;
@@ -189,6 +227,18 @@ test("HITL-T04 RS-A-012 records Service Verification separately from material ef
     assert.equal(result.kind, "COMMITTED");
     const snapshot = await runtime.repository.load(scenario.scopeBaseline.scopeRef);
     assert.equal(snapshot.materialEffects.length, 1);
+    const serviceRecord = snapshot.verificationClosureEffects.find((record) => record.actionId === "RS-A-012");
+    assert.ok(serviceRecord);
+    assert.equal(serviceRecord.serviceVerificationRef, "HITL1:SERVICE_VERIFICATION:VERIFIED_OK");
+    assert.equal(serviceRecord.customerVerificationRef, undefined);
+    assert.equal(serviceRecord.closureEligibilityRef, undefined);
+    assert.equal(serviceRecord.closureDecisionRef, undefined);
+    const serviceExecution = snapshot.actionExecutions.find((record) => record.commandId === "CMD-HITL-T04-A12");
+    assert.equal(serviceExecution.responseRef, serviceRecord.recordRef);
+    const responseCorrupted = clone(snapshot);
+    responseCorrupted.actionExecutions.find((record) => record.commandId === "CMD-HITL-T04-A12").responseRef =
+      "NON_SEMANTIC_CORRUPTED_RESPONSE_REFERENCE";
+    assert.equal(readHitlTrialState(responseCorrupted).serviceVerification, "VERIFIED_OK");
     assert.equal(readHitlTrialState(snapshot).serviceVerification, "VERIFIED_OK");
     assert.equal(snapshot.responsibilityHandoverEffects.length, 0);
   });
@@ -208,18 +258,60 @@ test("HITL-T05 negative Service Verification never implies Customer Verification
 });
 
 test("HITL-T06 RS-A-013 is a separate authorized human action when REQUIRED", async () => {
-  await withRuntime(HITL_TRIAL1_SCENARIOS.S01_SUCCESS_REQUIRED, async ({ runtime, scenario }) => {
+  const raw = clone(HITL_TRIAL1_SCENARIOS.S01_SUCCESS_REQUIRED);
+  raw.evidenceBasis.evidence.push({
+    evidenceId: "EV-HITL1-GOV-2",
+    sourceType: "SYNTHETIC_TRIAL",
+    sourceRef: "SRC-HITL1-GOV-2",
+    actorOrSystemRef: "SYSTEM-HITL1-FIXTURE",
+    receivedTime: "2026-09-21T00:00:00.000Z",
+    currentness: { status: "CURRENT", basisRef: "EV-HITL1-CURRENT-2" },
+    payloadOrRecordRef: "PAYLOAD-HITL1-GOV-2",
+    provenanceChain: [],
+  });
+  raw.evidenceBasis.integrityAssessments.push({
+    evidenceId: "EV-HITL1-GOV-2",
+    assessment: { sufficient: true, conflict: false, evidenceRefs: ["EV-HITL1-INTEGRITY-2"] },
+  });
+
+  await withRuntime(raw, async ({ runtime, scenario }) => {
     await executeRecovery(runtime, scenario);
     await runtime.execute(humanCommand(scenario, "RS-A-012", "VERIFIED_OK", 1, "CMD-HITL-T06-A12"));
+
+    for (const [suffix, evidenceRefs] of [
+      ["EMPTY", []],
+      ["MISSING", ["EV-HITL1-GOV"]],
+      ["SUBSTITUTED", ["EV-HITL1-GOV", "EV-NOT-GOVERNING"]],
+    ]) {
+      const command = humanCommand(scenario, "RS-A-013", "CONFIRMED_OK", 2, `CMD-HITL-T06-A13-${suffix}`);
+      command.evidenceRefs = evidenceRefs;
+      const rejectedEvidence = await runtime.execute(command);
+      assert.equal(rejectedEvidence.kind, "REJECTED");
+      assert.ok(rejectedEvidence.reasons.includes("determining_evidence_set_mismatch"));
+      assert.equal((await runtime.repository.load(scenario.scopeBaseline.scopeRef)).version, 2);
+    }
+
     const wrong = humanCommand(scenario, "RS-A-013", "CONFIRMED_OK", 2, "CMD-HITL-T06-A13-WRONG");
     wrong.actingContextRef = "CTX-HITL1-SERVICE-VERIFICATION";
     const rejected = await runtime.execute(wrong);
     assert.equal(rejected.kind, "REJECTED");
-    const committed = await runtime.execute(humanCommand(scenario, "RS-A-013", "CONFIRMED_OK", 2, "CMD-HITL-T06-A13"));
+
+    const committed = await runtime.execute(
+      humanCommand(scenario, "RS-A-013", "CONFIRMED_OK", 2, "CMD-HITL-T06-A13"),
+    );
     assert.equal(committed.kind, "COMMITTED");
     const state = readHitlTrialState(await runtime.repository.load(scenario.scopeBaseline.scopeRef));
     assert.equal(state.customerVerification, "CONFIRMED_OK");
     assert.equal(state.closureEligibility, "ELIGIBLE");
+
+    const recovery = await runtime.repository.recoverRecords(scenario.scopeBaseline.scopeRef);
+    const a13 = recovery.records.find(
+      (record) => record.batch.commandReplayIdentity?.commandId === "CMD-HITL-T06-A13",
+    );
+    assert.deepEqual(
+      a13.batch.evidenceProvenance.map((item) => item.evidenceId),
+      ["EV-HITL1-GOV", "EV-HITL1-GOV-2"],
+    );
   });
 });
 
