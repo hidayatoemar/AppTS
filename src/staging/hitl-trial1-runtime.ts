@@ -20,6 +20,7 @@ import {
   type ClosureDecisionIntent,
   type ClosureEligibilityResult,
   type CustomerVerificationIntent,
+  type HitlA14HistoricalBasis,
   type HitlTrial1ActionId,
   type HitlTrial1RuntimeScenario,
   type HitlVerificationClosureRecord,
@@ -70,6 +71,7 @@ interface RuntimeDeps {
 
 interface CommittedHitlHistory {
   committedRecord: JsonlCommittedRecord;
+  historicalRecords: readonly JsonlCommittedRecord[];
   execution: ActionExecutionRecord;
   verification: HitlVerificationClosureRecord;
   normalizedEnvelope: string;
@@ -438,6 +440,14 @@ export function buildIdentityCanonicalBytes(
   scenario: HitlTrial1RuntimeScenario,
   governingBasisVersion: number,
 ): string {
+  return JSON.stringify(buildA14HistoricalBasis(snapshot, scenario, governingBasisVersion));
+}
+
+export function buildA14HistoricalBasis(
+  snapshot: ScopeSnapshot,
+  scenario: HitlTrial1RuntimeScenario,
+  governingBasisVersion: number,
+): HitlA14HistoricalBasis {
   const refs = currentVerificationRefs(snapshot);
   const integrityByEvidence = new Map(
     scenario.evidenceBasis.integrityAssessments.map((item) => [item.evidenceId, item.assessment]),
@@ -484,18 +494,16 @@ export function buildIdentityCanonicalBytes(
         a.policyBasisRef.localeCompare(b.policyBasisRef),
     );
 
-  const scope = {
-    situationId: snapshot.scopeRef.situationId,
-    subjectType: snapshot.scopeRef.subjectType,
-    subjectId: snapshot.scopeRef.subjectId,
-    parentScopeRef: snapshot.scopeRef.parentScopeRef ?? null,
-    relationRef: snapshot.scopeRef.relationRef ?? null,
-  };
-
-  return JSON.stringify({
+  return {
     trialId: scenario.trialId,
     scenarioId: scenario.scenarioId,
-    scope,
+    scope: {
+      situationId: snapshot.scopeRef.situationId,
+      subjectType: snapshot.scopeRef.subjectType,
+      subjectId: snapshot.scopeRef.subjectId,
+      parentScopeRef: snapshot.scopeRef.parentScopeRef ?? null,
+      relationRef: snapshot.scopeRef.relationRef ?? null,
+    },
     governingBasisVersion,
     serviceVerificationRef: refs.serviceVerificationRef ?? null,
     customerVerificationApplicability: scenario.customerVerificationApplicability,
@@ -506,7 +514,7 @@ export function buildIdentityCanonicalBytes(
     governingPolicyBasisRefs: [...scenario.evidenceBasis.policyBasisRefs].sort(),
     governingEvidenceBasis,
     residualObligationBasis,
-  });
+  };
 }
 
 async function recoverPendingA14(deps: RuntimeDeps, runtime: HitlTrial1Runtime): Promise<void> {
@@ -757,6 +765,11 @@ function makeVerificationRecord(args: {
               canonicalA14IdentityBytes: requireA14Identity(identity).canonicalBytes,
               canonicalA14GoverningBasisVersion:
                 requireA14Identity(identity).governingBasisVersion,
+              canonicalA14HistoricalBasis: buildA14HistoricalBasis(
+                snapshot,
+                scenario,
+                requireA14Identity(identity).governingBasisVersion,
+              ),
             }
           : { closureDecisionRef: makeClosureDecisionRef(value as ClosureDecisionIntent) };
 
