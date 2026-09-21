@@ -221,11 +221,13 @@ test("HITL-T01 exactly one synthetic human owns all admitted human contexts", as
   ]) {
     const mismatch = clone(HITL_TRIAL1_SCENARIOS.S01_SUCCESS_REQUIRED);
     const recoveryBinding = mismatch.actingContexts.find((item) => item.actionId === "RS-A-022");
-    const recoveryBaseline = mismatch.scopeBaseline.actingContextCandidates.find(
+    const recoveryIndex = mismatch.scopeBaseline.actingContextCandidates.findIndex(
       (item) => item.contextRef === recoveryBinding.actingContextRef,
     );
-    assert.ok(recoveryBaseline);
-    mutate(recoveryBaseline);
+    assert.notEqual(recoveryIndex, -1);
+    mismatch.scopeBaseline.actingContextCandidates[recoveryIndex] =
+      clone(mismatch.scopeBaseline.actingContextCandidates[recoveryIndex]);
+    mutate(mismatch.scopeBaseline.actingContextCandidates[recoveryIndex]);
     assert.throws(
       () => validateHitlTrial1ScenarioObject(mismatch),
       /HITL_BASELINE_BINDING_MISMATCH/,
