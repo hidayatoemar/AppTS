@@ -6,6 +6,7 @@ on:
       - rebaseline/full-system-mockup
     paths:
       - 'mockup/**'
+      - '.github/workflows/public-full-system-mockup.yml'
 
 permissions:
   contents: read
@@ -79,10 +80,13 @@ jobs:
           [Service]
           Type=simple
           WorkingDirectory=/opt/appts-full-mockup/current
+          Environment=PORT=80
           ExecStart=/usr/bin/node /opt/appts-full-mockup/current/server.mjs
           Restart=on-failure
           RestartSec=2
           NoNewPrivileges=true
+          CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+          AmbientCapabilities=CAP_NET_BIND_SERVICE
 
           [Install]
           WantedBy=multi-user.target
@@ -90,22 +94,23 @@ jobs:
 
           sudo install -m 0644 /tmp/appts-full-mockup.service /etc/systemd/system/appts-full-mockup.service
           sudo systemctl daemon-reload
-          sudo systemctl enable --now appts-full-mockup.service
-          sudo systemctl restart appts-full-mockup.service
 
           if command -v firewall-cmd >/dev/null 2>&1 && sudo systemctl is-active --quiet firewalld; then
-            sudo firewall-cmd --permanent --add-port=8088/tcp
+            sudo firewall-cmd --permanent --add-service=http
             sudo firewall-cmd --reload
           fi
 
+          sudo systemctl enable --now appts-full-mockup.service
+          sudo systemctl restart appts-full-mockup.service
+
           for n in $(seq 1 20); do
-            if curl -fsS http://127.0.0.1:8088/ >/dev/null; then
+            if curl -fsS http://127.0.0.1/ >/dev/null; then
               break
             fi
             sleep 1
           done
-          curl -fsS http://127.0.0.1:8088/ | grep -F 'APPTS FULL-SYSTEM MOCKUP' >/dev/null
-          ss -lntH | awk '{print $4}' | grep -Fx '0.0.0.0:8088'
+          curl -fsS http://127.0.0.1/ | grep -F 'APPTS FULL-SYSTEM MOCKUP' >/dev/null
+          ss -lntH | awk '{print $4}' | grep -Fx '0.0.0.0:80'
           rm -f /tmp/appts-full-mockup.tar.gz /tmp/appts-full-mockup.service
           REMOTE
 
@@ -114,7 +119,7 @@ jobs:
         run: |
           set -euo pipefail
           for n in $(seq 1 12); do
-            if curl -fsS --max-time 8 http://103.127.99.11:8088/ | grep -F 'APPTS FULL-SYSTEM MOCKUP' >/dev/null; then
+            if curl -fsS --max-time 8 http://103.127.99.11/ | grep -F 'APPTS FULL-SYSTEM MOCKUP' >/dev/null; then
               echo "public_mockup_reachable=PASS"
               exit 0
             fi
