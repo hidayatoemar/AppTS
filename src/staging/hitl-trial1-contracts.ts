@@ -117,6 +117,13 @@ export interface HitlA14HistoricalBasis {
   }[];
 }
 
+export interface HitlA14DeterminingIntegrityEntry {
+  evidenceId: Ref;
+  integritySufficient: boolean;
+  integrityConflict: boolean;
+  integrityEvidenceRefs: readonly Ref[];
+}
+
 export interface HitlVerificationClosureRecord extends VerificationClosureEvaluation {
   recordKind: "HITL1_VERIFICATION_CLOSURE";
   recordRef: Ref;
@@ -134,6 +141,7 @@ export interface HitlVerificationClosureRecord extends VerificationClosureEvalua
   canonicalA14IdentityBytes?: string;
   canonicalA14GoverningBasisVersion?: number;
   canonicalA14HistoricalBasis?: HitlA14HistoricalBasis;
+  determiningIntegrityBasis?: readonly HitlA14DeterminingIntegrityEntry[];
 }
 
 export interface TrialActionProjection {
