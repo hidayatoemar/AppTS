@@ -339,8 +339,8 @@ jobs:
           grep -Fx '# skipped 0' /tmp/target-gate-b.tap
           cd /opt/appts-restore-service/current
           node --test tests/*.test.mjs tests/vectors/*.test.mjs | tee /tmp/target-gate-c.tap
-          grep -Fx '# tests 107' /tmp/target-gate-c.tap
-          grep -Fx '# pass 107' /tmp/target-gate-c.tap
+          grep -Fx '# tests 129' /tmp/target-gate-c.tap
+          grep -Fx '# pass 129' /tmp/target-gate-c.tap
           grep -Fx '# fail 0' /tmp/target-gate-c.tap
           grep -Fx '# skipped 0' /tmp/target-gate-c.tap
           node /tmp/staging-acceptance.mjs
