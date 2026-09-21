@@ -600,19 +600,13 @@ jobs:
           echo installed_release_oracle_free=PASS
 
           node /tmp/staging-acceptance.mjs
-          app_listener=$(ss -lntH | awk '{print $4}' | grep -E '(^|])?:8080
-          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 \
-            "rm -f /tmp/provision-local-runtime.sh /tmp/local-runtime-$CANDIDATE_SHA.tar.gz /tmp/candidate-gate-c.tar.gz /tmp/gate-a.tar.gz /tmp/gate-b.tar.gz /tmp/staging-acceptance.mjs /tmp/target-gate-a.tap /tmp/target-gate-b.tap /tmp/target-gate-c.tap"
- || true)
+          app_listener=$(ss -lntH | awk '{print $4}' | grep -E '(^|])?:8080$' || true)
           test "$app_listener" = '127.0.0.1:8080'
-          test -z "$(ss -lntH | awk '{print $4}' | grep -E '(^|:)(80|443)
-          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 \
-            "rm -f /tmp/provision-local-runtime.sh /tmp/local-runtime-$CANDIDATE_SHA.tar.gz /tmp/gate-a.tar.gz /tmp/gate-b.tar.gz /tmp/staging-acceptance.mjs /tmp/target-gate-a.tap /tmp/target-gate-b.tap /tmp/target-gate-c.tap"
- || true)"
+          test -z "$(ss -lntH | awk '{print $4}' | grep -E '(^|:)(80|443)$' || true)"
           ! sudo journalctl -u appts-restore-service-local.service --no-pager | grep -F 'PAYLOAD-DO-NOT-LOG-LOCAL-TRIAL'
           ! sudo journalctl -u appts-restore-service-local.service --no-pager | grep -F 'EV-HITL1-GOV'
           echo target_host_three_gate_acceptance=PASS
           echo target_host_hitl_trial1_acceptance=PASS
           REMOTE_ACCEPTANCE
           ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 \
-            "rm -f /tmp/provision-local-runtime.sh /tmp/local-runtime-$CANDIDATE_SHA.tar.gz /tmp/gate-a.tar.gz /tmp/gate-b.tar.gz /tmp/staging-acceptance.mjs /tmp/target-gate-a.tap /tmp/target-gate-b.tap /tmp/target-gate-c.tap"
+            "rm -f /tmp/provision-local-runtime.sh /tmp/local-runtime-$CANDIDATE_SHA.tar.gz /tmp/candidate-gate-c.tar.gz /tmp/gate-a.tar.gz /tmp/gate-b.tar.gz /tmp/staging-acceptance.mjs /tmp/target-gate-a.tap /tmp/target-gate-b.tap /tmp/target-gate-c.tap"
