@@ -1,0 +1,124 @@
+name: public-full-system-mockup
+
+on:
+  push:
+    branches:
+      - rebaseline/full-system-mockup
+    paths:
+      - 'mockup/**'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-mockup:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package static mockup
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f mockup/index.html
+          test -f mockup/server.mjs
+          tar -czf "$RUNNER_TEMP/appts-full-mockup.tar.gz" -C mockup .
+
+      - name: Prepare pinned SSH identity
+        shell: bash
+        env:
+          APPTS_STAGING_SSH_PRIVATE_KEY: ${{ secrets.APPTS_STAGING_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "${APPTS_STAGING_SSH_PRIVATE_KEY:-}"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$APPTS_STAGING_SSH_PRIVATE_KEY" > "$HOME/.ssh/appts_staging"
+          chmod 600 "$HOME/.ssh/appts_staging"
+          cat > "$HOME/.ssh/known_hosts" <<'EOF'
+          103.127.99.11 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILpRJVkwh143CmmrMkQvgfNyRIbV964SsAYLZ3BlaGdh
+          EOF
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Deploy public synthetic mockup
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSH_OPTS=(
+            -i "$HOME/.ssh/appts_staging"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+            -o ConnectTimeout=12
+          )
+
+          scp "${SSH_OPTS[@]}" "$RUNNER_TEMP/appts-full-mockup.tar.gz" appts-mcr@103.127.99.11:/tmp/appts-full-mockup.tar.gz
+
+          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          sudo install -d -m 0755 /opt/appts-full-mockup
+          sudo rm -rf /opt/appts-full-mockup/current.new
+          sudo install -d -m 0755 /opt/appts-full-mockup/current.new
+          sudo tar -xzf /tmp/appts-full-mockup.tar.gz -C /opt/appts-full-mockup/current.new
+
+          if [ -d /opt/appts-full-mockup/current ]; then
+            sudo rm -rf /opt/appts-full-mockup/previous
+            sudo mv /opt/appts-full-mockup/current /opt/appts-full-mockup/previous
+          fi
+          sudo mv /opt/appts-full-mockup/current.new /opt/appts-full-mockup/current
+          sudo chmod -R a+rX /opt/appts-full-mockup/current
+
+          cat >/tmp/appts-full-mockup.service <<'UNIT'
+          [Unit]
+          Description=AppTS Full-System Synthetic Mockup
+          After=network.target
+
+          [Service]
+          Type=simple
+          WorkingDirectory=/opt/appts-full-mockup/current
+          ExecStart=/usr/bin/node /opt/appts-full-mockup/current/server.mjs
+          Restart=on-failure
+          RestartSec=2
+          NoNewPrivileges=true
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          sudo install -m 0644 /tmp/appts-full-mockup.service /etc/systemd/system/appts-full-mockup.service
+          sudo systemctl daemon-reload
+          sudo systemctl enable --now appts-full-mockup.service
+          sudo systemctl restart appts-full-mockup.service
+
+          if command -v firewall-cmd >/dev/null 2>&1 && sudo systemctl is-active --quiet firewalld; then
+            sudo firewall-cmd --permanent --add-port=8088/tcp
+            sudo firewall-cmd --reload
+          fi
+
+          for n in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8088/ >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8088/ | grep -F 'APPTS FULL-SYSTEM MOCKUP' >/dev/null
+          ss -lntH | awk '{print $4}' | grep -Fx '0.0.0.0:8088'
+          rm -f /tmp/appts-full-mockup.tar.gz /tmp/appts-full-mockup.service
+          REMOTE
+
+      - name: Verify public browser reachability
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in $(seq 1 12); do
+            if curl -fsS --max-time 8 http://103.127.99.11:8088/ | grep -F 'APPTS FULL-SYSTEM MOCKUP' >/dev/null; then
+              echo "public_mockup_reachable=PASS"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "public_mockup_reachable=FAIL" >&2
+          exit 1
