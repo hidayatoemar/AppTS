@@ -19,13 +19,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Package static mockup
+      - name: Package static mockup and tunnel binary
         shell: bash
         run: |
           set -euo pipefail
           test -f mockup/index.html
           test -f mockup/server.mjs
           tar -czf "$RUNNER_TEMP/appts-full-mockup.tar.gz" -C mockup .
+          curl -fsSL --retry 3             https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64             -o "$RUNNER_TEMP/cloudflared"
+          chmod +x "$RUNNER_TEMP/cloudflared"
 
       - name: Prepare pinned SSH identity
         shell: bash
@@ -42,7 +44,8 @@ jobs:
           EOF
           chmod 600 "$HOME/.ssh/known_hosts"
 
-      - name: Deploy public synthetic mockup
+      - name: Deploy synthetic mockup and browser tunnel
+        id: deploy
         shell: bash
         run: |
           set -euo pipefail
@@ -55,7 +58,7 @@ jobs:
             -o ConnectTimeout=12
           )
 
-          scp "${SSH_OPTS[@]}" "$RUNNER_TEMP/appts-full-mockup.tar.gz" appts-mcr@103.127.99.11:/tmp/appts-full-mockup.tar.gz
+          scp "${SSH_OPTS[@]}"             "$RUNNER_TEMP/appts-full-mockup.tar.gz"             "$RUNNER_TEMP/cloudflared"             appts-mcr@103.127.99.11:/tmp/
 
           ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 'bash -s' <<'REMOTE'
           set -euo pipefail
@@ -93,37 +96,74 @@ jobs:
           UNIT
 
           sudo install -m 0644 /tmp/appts-full-mockup.service /etc/systemd/system/appts-full-mockup.service
+          sudo install -m 0755 /tmp/cloudflared /usr/local/bin/cloudflared
+
+          cat >/tmp/appts-full-mockup-tunnel.service <<'UNIT'
+          [Unit]
+          Description=AppTS Full-System Mockup Browser Tunnel
+          After=network-online.target appts-full-mockup.service
+          Wants=network-online.target
+          Requires=appts-full-mockup.service
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:80
+          Restart=always
+          RestartSec=5
+          NoNewPrivileges=true
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          sudo install -m 0644 /tmp/appts-full-mockup-tunnel.service /etc/systemd/system/appts-full-mockup-tunnel.service
           sudo systemctl daemon-reload
-
-          if command -v firewall-cmd >/dev/null 2>&1 && sudo systemctl is-active --quiet firewalld; then
-            sudo firewall-cmd --permanent --add-service=http
-            sudo firewall-cmd --reload
-          fi
-
           sudo systemctl enable --now appts-full-mockup.service
           sudo systemctl restart appts-full-mockup.service
 
           for n in $(seq 1 20); do
-            if curl -fsS http://127.0.0.1/ >/dev/null; then
+            if curl -fsS http://127.0.0.1/ | grep -F 'APPTS FULL-SYSTEM MOCKUP' >/dev/null; then
               break
             fi
             sleep 1
           done
           curl -fsS http://127.0.0.1/ | grep -F 'APPTS FULL-SYSTEM MOCKUP' >/dev/null
-          ss -lntH | awk '{print $4}' | grep -Fx '0.0.0.0:80'
-          rm -f /tmp/appts-full-mockup.tar.gz /tmp/appts-full-mockup.service
+
+          if ! sudo systemctl is-active --quiet appts-full-mockup-tunnel.service; then
+            sudo systemctl enable --now appts-full-mockup-tunnel.service
+          fi
+
+          url=""
+          for n in $(seq 1 30); do
+            url="$(sudo journalctl -u appts-full-mockup-tunnel.service --no-pager -n 120               | grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true)"
+            if [ -n "$url" ]; then break; fi
+            sleep 2
+          done
+          test -n "$url"
+          printf '%s\n' "$url" | sudo tee /opt/appts-full-mockup/PUBLIC_URL >/dev/null
+          echo "PUBLIC_MOCKUP_URL=$url"
+
+          rm -f /tmp/appts-full-mockup.tar.gz /tmp/cloudflared /tmp/appts-full-mockup.service /tmp/appts-full-mockup-tunnel.service
           REMOTE
 
-      - name: Verify public browser reachability
+          url="$(ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 'cat /opt/appts-full-mockup/PUBLIC_URL')"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "PUBLIC_MOCKUP_URL=$url"
+
+      - name: Verify browser reachability
         shell: bash
+        env:
+          PUBLIC_MOCKUP_URL: ${{ steps.deploy.outputs.url }}
         run: |
           set -euo pipefail
-          for n in $(seq 1 12); do
-            if curl -fsS --max-time 8 http://103.127.99.11/ | grep -F 'APPTS FULL-SYSTEM MOCKUP' >/dev/null; then
-              echo "public_mockup_reachable=PASS"
+          test -n "$PUBLIC_MOCKUP_URL"
+          for n in $(seq 1 20); do
+            if curl -fsS --max-time 10 "$PUBLIC_MOCKUP_URL/" | grep -F 'APPTS FULL-SYSTEM MOCKUP' >/dev/null; then
+              echo "browser_mockup_reachable=PASS"
+              echo "PUBLIC_MOCKUP_URL=$PUBLIC_MOCKUP_URL"
               exit 0
             fi
-            sleep 5
+            sleep 3
           done
-          echo "public_mockup_reachable=FAIL" >&2
+          echo "browser_mockup_reachable=FAIL" >&2
           exit 1
