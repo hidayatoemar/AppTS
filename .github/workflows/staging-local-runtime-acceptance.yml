@@ -211,8 +211,16 @@ jobs:
           tar -czf "$RUNNER_TEMP/gate-a.tar.gz" -C gate-a dist tests
           tar -czf "$RUNNER_TEMP/gate-b.tar.gz" -C gate-b dist tests infra/staging
           printf '%s\n' "$CANDIDATE_SHA" > DEPLOYED_COMMIT
-          tar -czf "$RUNNER_TEMP/local-runtime-$CANDIDATE_SHA.tar.gz"             DEPLOYED_COMMIT package.json README.md dist tests infra/staging
-          sha256sum "$RUNNER_TEMP/local-runtime-$CANDIDATE_SHA.tar.gz"             | tee "$RUNNER_TEMP/local-runtime-$CANDIDATE_SHA.sha256"
+          tar -czf "$RUNNER_TEMP/local-runtime-$CANDIDATE_SHA.tar.gz" \
+            DEPLOYED_COMMIT package.json README.md dist infra/staging
+          ! tar -tzf "$RUNNER_TEMP/local-runtime-$CANDIDATE_SHA.tar.gz" | grep -E '(^|/)tests(/|$)'
+          ! tar -tzf "$RUNNER_TEMP/local-runtime-$CANDIDATE_SHA.tar.gz" | grep -F 'hitl-trial1-oracles.mjs'
+          tar -czf "$RUNNER_TEMP/candidate-gate-c-$CANDIDATE_SHA.tar.gz" \
+            dist tests infra/staging
+          tar -tzf "$RUNNER_TEMP/candidate-gate-c-$CANDIDATE_SHA.tar.gz" \
+            | grep -Fx 'tests/fixtures/hitl-trial1-oracles.mjs'
+          sha256sum "$RUNNER_TEMP/local-runtime-$CANDIDATE_SHA.tar.gz" \
+            | tee "$RUNNER_TEMP/local-runtime-$CANDIDATE_SHA.sha256"
       - name: Prepare pinned SSH identity
         shell: bash
         env:
@@ -484,6 +492,9 @@ jobs:
             "$RUNNER_TEMP/gate-b.tar.gz" \
             "$RUNNER_TEMP/staging-acceptance.mjs" \
             appts-mcr@103.127.99.11:/tmp/
+          scp "${SSH_OPTS[@]}" \
+            "$RUNNER_TEMP/candidate-gate-c-$CANDIDATE_SHA.tar.gz" \
+            appts-mcr@103.127.99.11:/tmp/candidate-gate-c.tar.gz
           ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 \
             "bash /tmp/provision-local-runtime.sh '$CANDIDATE_SHA' '/tmp/local-runtime-$CANDIDATE_SHA.tar.gz' '$artifact_sha'"
           ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 'bash -s' <<'REMOTE_HITL_PROFILE'
@@ -538,12 +549,14 @@ jobs:
           test -z "$(ss -lntH | awk '{print $4}' | grep -E '(^|:)(80|443)$' || true)"
           echo hitl_runtime_profile_activation=PASS
           REMOTE_HITL_PROFILE
-          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 'bash -s' <<'REMOTE_ACCEPTANCE'
+          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 \
+            "CANDIDATE_SHA='$CANDIDATE_SHA' bash -s" <<'REMOTE_ACCEPTANCE'
           set -euo pipefail
           test "$(node -p 'process.versions.node.split(".")[0]')" = '22'
           worka=$(mktemp -d)
           workb=$(mktemp -d)
-          trap 'rm -rf "$worka" "$workb"' EXIT
+          workc=$(mktemp -d /tmp/appts-gate-c.XXXXXX)
+          trap 'rm -rf "$worka" "$workb" "$workc"' EXIT
           tar -xzf /tmp/gate-a.tar.gz -C "$worka"
           tar -xzf /tmp/gate-b.tar.gz -C "$workb"
           node --test "$worka"/tests/*.test.mjs "$worka"/tests/vectors/*.test.mjs | tee /tmp/target-gate-a.tap
@@ -556,16 +569,46 @@ jobs:
           grep -Fx '# pass 92' /tmp/target-gate-b.tap
           grep -Fx '# fail 0' /tmp/target-gate-b.tap
           grep -Fx '# skipped 0' /tmp/target-gate-b.tap
-          cd /opt/appts-restore-service/current
-          node --test tests/*.test.mjs tests/vectors/*.test.mjs | tee /tmp/target-gate-c.tap
+
+          test "${workc#/opt/appts-restore-service}" = "$workc"
+          tar -xzf /tmp/candidate-gate-c.tar.gz -C "$workc"
+          test -f "$workc/tests/fixtures/hitl-trial1-oracles.mjs"
+          (
+            cd "$workc"
+            node --test tests/*.test.mjs tests/vectors/*.test.mjs
+          ) | tee /tmp/target-gate-c.tap
           grep -Fx '# tests 129' /tmp/target-gate-c.tap
           grep -Fx '# pass 129' /tmp/target-gate-c.tap
           grep -Fx '# fail 0' /tmp/target-gate-c.tap
           grep -Fx '# skipped 0' /tmp/target-gate-c.tap
+
+          rm -rf "$workc"
+          rm -f /tmp/candidate-gate-c.tar.gz
+          test ! -e /tmp/candidate-gate-c.tar.gz
+          test ! -e "$workc"
+
+          installed_release="$(readlink -f /opt/appts-restore-service/current)"
+          test "$installed_release" = "/opt/appts-restore-service/releases/$CANDIDATE_SHA"
+          test -f "$installed_release/DEPLOYED_COMMIT"
+          test "$(cat "$installed_release/DEPLOYED_COMMIT")" = "$CANDIDATE_SHA"
+          test ! -d "$installed_release/tests"
+          if find "$installed_release" -type f -name 'hitl-trial1-oracles.mjs' -print -quit | grep -q .; then
+            echo installed_release_oracle_free=FAIL
+            exit 1
+          fi
+          echo ephemeral_gate_c_cleanup=PASS
+          echo installed_release_oracle_free=PASS
+
           node /tmp/staging-acceptance.mjs
-          app_listener=$(ss -lntH | awk '{print $4}' | grep -E '(^|])?:8080$' || true)
+          app_listener=$(ss -lntH | awk '{print $4}' | grep -E '(^|])?:8080
+          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 \
+            "rm -f /tmp/provision-local-runtime.sh /tmp/local-runtime-$CANDIDATE_SHA.tar.gz /tmp/candidate-gate-c.tar.gz /tmp/gate-a.tar.gz /tmp/gate-b.tar.gz /tmp/staging-acceptance.mjs /tmp/target-gate-a.tap /tmp/target-gate-b.tap /tmp/target-gate-c.tap"
+ || true)
           test "$app_listener" = '127.0.0.1:8080'
-          test -z "$(ss -lntH | awk '{print $4}' | grep -E '(^|:)(80|443)$' || true)"
+          test -z "$(ss -lntH | awk '{print $4}' | grep -E '(^|:)(80|443)
+          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 \
+            "rm -f /tmp/provision-local-runtime.sh /tmp/local-runtime-$CANDIDATE_SHA.tar.gz /tmp/gate-a.tar.gz /tmp/gate-b.tar.gz /tmp/staging-acceptance.mjs /tmp/target-gate-a.tap /tmp/target-gate-b.tap /tmp/target-gate-c.tap"
+ || true)"
           ! sudo journalctl -u appts-restore-service-local.service --no-pager | grep -F 'PAYLOAD-DO-NOT-LOG-LOCAL-TRIAL'
           ! sudo journalctl -u appts-restore-service-local.service --no-pager | grep -F 'EV-HITL1-GOV'
           echo target_host_three_gate_acceptance=PASS
