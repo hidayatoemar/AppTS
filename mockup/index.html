@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AppTS Full-System Mockup</title>
+<style>
+:root{
+  --bg:#0b1117;--panel:#111a24;--panel2:#162231;--line:#26384b;--muted:#8fa3b8;
+  --text:#e8eef4;--soft:#c7d3df;--accent:#5fb3ff;--ok:#62d39b;--warn:#ffc857;--bad:#ff7b7b;
+}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+button{font:inherit}.banner{background:#5a3d00;color:#ffe5a3;padding:8px 16px;text-align:center;font-weight:700;letter-spacing:.03em}
+.topbar{height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-bottom:1px solid var(--line);background:#0e1620;position:sticky;top:0;z-index:5}
+.brand{display:flex;align-items:center;gap:12px}.logo{width:36px;height:36px;border-radius:10px;border:1px solid #41617e;background:linear-gradient(135deg,#16324a,#0d1924);display:grid;place-items:center;font-weight:800}
+.brand h1{font-size:17px;margin:0}.brand small{color:var(--muted)}
+.user{display:flex;align-items:center;gap:10px;color:var(--soft)} .badge{padding:3px 8px;border-radius:999px;border:1px solid var(--line);background:#0d1721;color:var(--soft);font-size:12px}
+nav{display:flex;gap:4px;padding:8px 14px;border-bottom:1px solid var(--line);background:#0e1620;position:sticky;top:64px;z-index:4}
+nav button{border:0;background:transparent;color:var(--muted);padding:9px 12px;border-radius:8px;cursor:pointer}
+nav button.active,nav button:hover{background:#182638;color:var(--text)}
+.view{display:none}.view.active{display:block}
+.shell{display:grid;grid-template-columns:300px minmax(0,1fr) 320px;min-height:calc(100vh - 111px)}
+.left,.right{background:#0e1620}.left{border-right:1px solid var(--line)}.right{border-left:1px solid var(--line)}
+.section{padding:14px;border-bottom:1px solid var(--line)} .section h3{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 10px}
+.attn-tabs{display:flex;gap:5px;margin-bottom:10px}.attn-tabs button{flex:1;border:1px solid var(--line);background:#121d29;color:var(--muted);padding:6px;border-radius:7px}
+.attn-tabs button.active{color:#fff;border-color:#426887;background:#1a3044}
+.sit{padding:11px;border:1px solid transparent;border-radius:9px;margin:5px 0;cursor:pointer}.sit:hover{background:#152231}.sit.active{background:#172b3e;border-color:#3d6687}
+.sit .row{display:flex;justify-content:space-between;gap:8px}.sit .title{font-weight:650}.sit .meta{color:var(--muted);font-size:12px;margin-top:4px}.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;background:var(--accent)}
+.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}.dot.ok{background:var(--ok)}
+.main{padding:18px;overflow:auto}.crumb{color:var(--muted);font-size:12px;margin-bottom:8px}
+.headline{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:14px}
+.headline h2{font-size:23px;margin:0 0 5px}.meaning{font-size:15px;color:#a9cce9}.status-chip{white-space:nowrap;border:1px solid #35566f;padding:6px 10px;border-radius:999px;color:#b9d8ef;background:#112437}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{border:1px solid var(--line);background:var(--panel);border-radius:11px;padding:13px}.card h4{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 8px}.big{font-size:16px;font-weight:650}.sub{color:var(--muted);font-size:12px;margin-top:4px}
+.card.full{grid-column:1/-1}.kv{display:grid;grid-template-columns:110px 1fr;gap:6px 12px}.kv div:nth-child(odd){color:var(--muted)}
+.next{border-color:#426987;background:#10263a}.next .big{color:#d5efff}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.action{border:1px solid #3a6c91;background:#153650;color:#eaf6ff;padding:8px 11px;border-radius:8px;cursor:pointer}.action.secondary{background:#141f2b;border-color:var(--line);color:var(--soft)}.action:hover{filter:brightness(1.12)}
+.timeline{margin-top:12px}.event{display:grid;grid-template-columns:56px 10px 1fr;gap:8px;align-items:start;padding:7px 0}.event time{color:var(--muted);font-size:12px}.lineDot{width:8px;height:8px;border-radius:50%;background:#4c7899;margin-top:5px}.event b{font-weight:600}.event span{color:var(--muted)}
+.contextBox{padding:10px;border:1px solid var(--line);border-radius:9px;background:#121d29;margin-bottom:8px}.contextBox b{display:block}.contextBox small{color:var(--muted)}
+.rolepill{display:inline-block;margin:3px 4px 3px 0;padding:4px 7px;border-radius:6px;background:#172638;border:1px solid #29435a;color:#bdd6e8;font-size:12px}
+.auto{border-color:#3d745f;background:#11291f}.auto b{color:#9be2bd}
+.archWrap{padding:24px;max-width:1400px;margin:auto}.archWrap h2,.execWrap h2,.labWrap h2{margin-top:0}.archNote{color:var(--muted);margin-bottom:18px}
+.flow{display:grid;gap:12px}.fbox{border:1px solid #34536d;background:#10202e;border-radius:12px;padding:13px;text-align:center}.fbox strong{display:block;font-size:15px}.fbox small{color:var(--muted)}.arrow{text-align:center;color:#6e94b2;font-size:24px;height:22px;line-height:22px}
+.core{border:2px solid #365a75;border-radius:14px;padding:15px;background:#0d1721}.coreTitle{text-align:center;font-weight:750;margin-bottom:12px}.blocks{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}.block{border:1px solid var(--line);background:#142232;border-radius:9px;padding:11px;min-height:76px}.block b{display:block;margin-bottom:5px}.block small{color:var(--muted)}
+.ext{display:grid;grid-template-columns:1fr 1fr;gap:12px}.principles{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:12px}.principle{padding:10px;border:1px dashed #385a73;border-radius:8px;color:#b7ccdc;text-align:center}
+.execWrap,.labWrap{padding:24px;max-width:1300px;margin:auto}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.metric{border:1px solid var(--line);background:var(--panel);border-radius:11px;padding:14px}.metric .n{font-size:26px;font-weight:750}.metric .delta{font-size:12px;color:var(--muted)}.bar{height:7px;background:#1b2c3d;border-radius:4px;overflow:hidden;margin-top:8px}.bar i{display:block;height:100%;background:#4b89b7}
+.table{margin-top:15px;border:1px solid var(--line);border-radius:10px;overflow:hidden}.tr{display:grid;grid-template-columns:1.4fr .8fr .8fr .8fr 1.7fr;padding:9px 12px;border-bottom:1px solid var(--line)}.tr:last-child{border-bottom:0}.tr.head{background:#14202c;color:var(--muted);font-size:12px}.tr:not(.head){background:#101923}
+.labGrid{display:grid;grid-template-columns:320px 1fr;gap:14px}.scenario{border:1px solid var(--line);background:var(--panel);border-radius:11px;padding:12px;margin-bottom:8px;cursor:pointer}.scenario.active{border-color:#4d7797;background:#14283a}.stage{padding:16px;border:1px solid var(--line);border-radius:12px;background:#101923}.stage h3{margin-top:0}.stepLine{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.step{padding:6px 8px;border:1px solid var(--line);border-radius:7px;color:var(--muted)}.step.done{border-color:#366a54;color:#9ad8b8;background:#10261e}.step.now{border-color:#4b7898;color:#d0e9fb;background:#11283b}.simbtn{border:0;background:#2d6f9d;color:white;padding:9px 13px;border-radius:8px;cursor:pointer}.simbtn.ghost{background:#1a2632;color:#c9d6df;border:1px solid var(--line)}
+.toast{position:fixed;right:18px;bottom:18px;background:#183047;border:1px solid #416b8c;color:#e9f6ff;padding:11px 14px;border-radius:9px;box-shadow:0 12px 35px #0008;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none;z-index:10}.toast.show{opacity:1;transform:none}
+@media(max-width:1100px){.shell{grid-template-columns:260px 1fr}.right{grid-column:1/-1;border-left:0;border-top:1px solid var(--line)}.blocks{grid-template-columns:repeat(2,1fr)}.principles,.metrics{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:760px){.shell{grid-template-columns:1fr}.left,.right{border:0;border-bottom:1px solid var(--line)}.grid{grid-template-columns:1fr}.card.full{grid-column:auto}.blocks,.ext,.principles,.metrics,.labGrid{grid-template-columns:1fr}.topbar{height:auto;padding:10px}.user{display:none}nav{top:57px;overflow:auto}.tr{grid-template-columns:1fr 1fr}.tr>*:nth-child(n+3){display:none}}
+</style>
+</head>
+<body>
+<div class="banner">APPTS FULL-SYSTEM MOCKUP — SYNTHETIC DATA — NON-PRODUCTION</div>
+<header class="topbar">
+  <div class="brand"><div class="logo">AT</div><div><h1>AppTS</h1><small>Operational Responsibility Control</small></div></div>
+  <div class="user"><span>Budi Santoso</span><span class="badge">Duty ACTIVE</span><span class="badge">CIFO / Bandung</span></div>
+</header>
+<nav>
+  <button class="active" data-view="ops">Operations</button>
+  <button data-view="architecture">Functional Architecture</button>
+  <button data-view="executive">Executive</button>
+  <button data-view="lab">Scenario Lab</button>
+</nav>
+
+<section id="ops" class="view active">
+<div class="shell">
+  <aside class="left">
+    <div class="section">
+      <h3>Work Watch</h3>
+      <div class="attn-tabs"><button class="active">Active 5</button><button>Waiting 2</button><button>Attention 2</button></div>
+      <div id="situationList"></div>
+    </div>
+    <div class="section">
+      <h3>Human Context</h3>
+      <div class="contextBox"><b>Budi Santoso</b><small>One person, multiple lawful capacities</small></div>
+      <div>
+        <span class="rolepill">NOC Operator</span>
+        <span class="rolepill">Incident Coordinator</span>
+        <span class="rolepill">Service Verification</span>
+        <span class="rolepill">Customer Verification</span>
+        <span class="rolepill">Closure Decision</span>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="crumb" id="crumb"></div>
+    <div class="headline">
+      <div><h2 id="sitTitle"></h2><div class="meaning" id="meaning"></div></div>
+      <div class="status-chip" id="purpose"></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h4>Service / Impact</h4><div class="big" id="impact"></div><div class="sub" id="impactSub"></div></div>
+      <div class="card"><h4>Responsibility</h4><div class="big" id="responsibility"></div><div class="sub">Responsibility remains explicit until valid accepted handover.</div></div>
+      <div class="card"><h4>Work / Field</h4><div class="big" id="work"></div><div class="sub" id="workSub"></div></div>
+      <div class="card"><h4>Blocker / Dependency</h4><div class="big" id="blocker"></div><div class="sub" id="aging"></div></div>
+      <div class="card full"><h4>Evidence / Current Truth</h4><div class="kv" id="evidence"></div></div>
+      <div class="card full next"><h4>Next meaningful action</h4><div class="big" id="next"></div><div class="sub" id="whyNext"></div><div class="actions" id="actions"></div></div>
+      <div class="card full"><h4>Recent changes</h4><div class="timeline" id="timeline"></div></div>
+    </div>
+  </main>
+
+  <aside class="right">
+    <div class="section">
+      <h3>Resolved Working Context</h3>
+      <div class="contextBox auto"><b id="resolvedRole"></b><small>Resolved by AppTS from person + assignment + duty + situation + required authority.</small></div>
+      <div class="contextBox"><b>No manual Role mode required</b><small>Role selection is not the operator's primary navigation model.</small></div>
+    </div>
+    <div class="section">
+      <h3>Operational Truth</h3>
+      <div class="contextBox"><b>Parallel truths remain separate</b><small>Service, work, blocker, verification, responsibility and aging can all be true at the same time.</small></div>
+      <div class="contextBox"><b>Activity ≠ Progress</b><small>Calls and messages do not clear a blocker unless the real condition changes.</small></div>
+    </div>
+    <div class="section">
+      <h3>Technical detail</h3>
+      <div class="contextBox"><b>Diagnostic JSON</b><small>Available to engineers, intentionally not the primary operator surface.</small></div>
+    </div>
+  </aside>
+</div>
+</section>
+
+<section id="architecture" class="view">
+<div class="archWrap">
+  <h2>Full-System Functional Block Diagram — Level 0</h2>
+  <div class="archNote">This is the product shape. Implementation may be progressive; the system envelope is intentionally visible from the start.</div>
+  <div class="flow">
+    <div class="fbox"><strong>Humans & Operational Roles</strong><small>NOC · Customer Support · Field · Supervisor · Shared Support · Management</small></div>
+    <div class="arrow">↓</div>
+    <div class="fbox"><strong>Human Operational Projection</strong><small>Work Watch · Situation · Current Meaning · Evidence · Blocker · Responsibility · NEXT · Action</small></div>
+    <div class="arrow">↓</div>
+    <div class="core">
+      <div class="coreTitle">APPTS OPERATIONAL CORE</div>
+      <div class="blocks">
+        <div class="block"><b>Identity / Entity / Assignment</b><small>Person, Role Instances, organization boundary, roster, duty.</small></div>
+        <div class="block"><b>Ticket / Purpose / Situation</b><small>Operational subject and Purpose-specific context over one shared core.</small></div>
+        <div class="block"><b>Operational Truth</b><small>Evidence, state, uncertainty, blocker, dependency, waiting, aging.</small></div>
+        <div class="block"><b>Responsibility Continuity</b><small>Current Holder, handover offer, acceptance, no orphan responsibility.</small></div>
+        <div class="block"><b>Lawful Context Resolver</b><small>Resolve exact acting capacity and authority without manufacturing authority.</small></div>
+        <div class="block"><b>Gate / Feasible Action</b><small>What can meaningfully and lawfully happen now.</small></div>
+        <div class="block"><b>Command / Execution / Effect</b><small>Decision, execution and material effect remain distinct.</small></div>
+        <div class="block"><b>Verification / Disposition / Closure</b><small>Technical verification, customer truth, eligibility and closure decision.</small></div>
+      </div>
+      <div class="principles">
+        <div class="principle">Audit / provenance everywhere</div>
+        <div class="principle">Parallel truths, no mega-status</div>
+        <div class="principle">Purpose extensions, shared Core</div>
+        <div class="principle">Human judgment remains explicit</div>
+      </div>
+    </div>
+    <div class="arrow">↙ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ↘</div>
+    <div class="ext">
+      <div class="fbox"><strong>External Operational Systems</strong><small>CRM · NMS · Inventory · GIS · Provisioning · Vendor / Partner · Messaging</small></div>
+      <div class="fbox"><strong>Machine Actors & Deterministic Services</strong><small>Timers · correlation · reminders · adapters · derived state · monitoring</small></div>
+    </div>
+  </div>
+</div>
+</section>
+
+<section id="executive" class="view">
+<div class="execWrap">
+  <h2>Executive Projection — same truth, different horizon</h2>
+  <p class="archNote">Synthetic example. Executive view aggregates operational evidence without creating a second truth.</p>
+  <div class="metrics">
+    <div class="metric"><div class="n">14.2 h</div><b>MTTR</b><div class="delta">Approved reference: 4 h</div><div class="bar"><i style="width:78%"></i></div></div>
+    <div class="metric"><div class="n">17</div><b>Active Situations</b><div class="delta">5 waiting on external dependency</div><div class="bar"><i style="width:55%"></i></div></div>
+    <div class="metric"><div class="n">82%</div><b>Verification completed</b><div class="delta">18% pending customer response</div><div class="bar"><i style="width:82%"></i></div></div>
+    <div class="metric"><div class="n">63%</div><b>Estimated operating headroom</b><div class="delta">Field capacity is current limiting factor</div><div class="bar"><i style="width:63%"></i></div></div>
+  </div>
+  <div class="table">
+    <div class="tr head"><div>Capability</div><div>Actual</div><div>Reference</div><div>Gap</div><div>Business interpretation</div></div>
+    <div class="tr"><div>Restore service</div><div>14.2 h</div><div>4 h</div><div>+10.2 h</div><div>Blocker aging concentrated in field access and external material dependency.</div></div>
+    <div class="tr"><div>Provisioning</div><div>3.1 d</div><div>1 d</div><div>+2.1 d</div><div>Additional demand may exceed current activation capacity.</div></div>
+    <div class="tr"><div>Customer verification</div><div>82%</div><div>95%</div><div>-13%</div><div>Communication obligations require stronger alternate-contact handling.</div></div>
+  </div>
+</div>
+</section>
+
+<section id="lab" class="view">
+<div class="labWrap">
+  <h2>Scenario Lab</h2>
+  <p class="archNote">A human can understand AppTS by playing synthetic operations. No real system or customer data is touched.</p>
+  <div class="labGrid">
+    <div id="scenarioList"></div>
+    <div class="stage">
+      <h3 id="labTitle"></h3>
+      <div id="labMeaning" class="meaning"></div>
+      <div class="stepLine" id="stepLine"></div>
+      <div class="contextBox auto"><b id="labRole"></b><small>AppTS automatically resolves the lawful capacity for the current decision.</small></div>
+      <div class="card next" style="margin:12px 0"><h4>What the human should understand now</h4><div class="big" id="labPrompt"></div><div class="sub" id="labReason"></div></div>
+      <button class="simbtn" id="advance">Run next synthetic event</button>
+      <button class="simbtn ghost" id="reset">Reset scenario</button>
+    </div>
+  </div>
+</div>
+</section>
+<div class="toast" id="toast"></div>
+
+<script>
+const situations=[
+ {id:'abc',title:'PT ABC — Dedicated Internet',purpose:'RESTORE_SERVICE',severity:'warn',meaning:'Network recovery indicated · customer verification pending',impact:'Technical path appears recovered',impactSub:'Customer has not yet confirmed usable service.',responsibility:'Budi / NOC',work:'Post-intervention monitoring',workSub:'Optical level normal; counters stable.',blocker:'No technical blocker',aging:'Customer verification aging: 18 min',role:'Customer Verification',next:'Confirm actual customer condition',why:'Technical recovery evidence exists. Closure is not yet lawful because customer verification is still pending.',evidence:[['NMS','Optical normal / stable'],['Field','Replacement completed 09:32'],['End-to-end','Test OK 09:41'],['Customer','Awaiting confirmation']],actions:['Contact customer','Record customer observation','Open evidence'],timeline:[['09:32','Field replacement completed','Work changed; service truth not yet confirmed.'],['09:41','Recovery evidence sufficient','Network Recovery Indicated.'],['09:47','Customer contacted','Verification remains pending.']]},
+ {id:'ring',title:'Bandung East Access Ring',purpose:'RESTORE_SERVICE',severity:'bad',meaning:'Mass impact confirmed · field access blocked',impact:'42 services degraded',impactSub:'Shared infrastructure situation.',responsibility:'Dimas / NOC',work:'Field team at location',workSub:'Technician ready but cannot enter site.',blocker:'Waiting for lawful site access',aging:'Blocker aging: 46 min · escalation active',role:'Incident Coordinator',next:'Coordinate authorized site access',why:'More technical activity will not clear the dominant blocker. The required intervention is access authority.',evidence:[['NMS','Ring degradation confirmed'],['Field','Technician on-site'],['Access','Authorized contact unavailable'],['Coordination','Supervisor aware']],actions:['Request authorized contact','Open blocker history','Record intervention'],timeline:[['15:22','Mass impact confirmed','Incident correlation formed.'],['15:31','Field ready','Access blocker becomes dominant.'],['16:02','Aging threshold reached','Escalation obligation created; responsibility unchanged.']]},
+ {id:'material',title:'PT Nusantara — Metro-E',purpose:'RESTORE_SERVICE',severity:'warn',meaning:'Service degraded · material release dependency',impact:'Service unusable',impactSub:'Root cause bounded to failed optic.',responsibility:'Budi / NOC',work:'Field action ready / paused',workSub:'Correct replacement identified.',blocker:'Waiting for material release authority',aging:'Blocker aging: 27 min',role:'NOC Operator',next:'Request attention from material-release authority',why:'Physical stock exists, but usable stock is not yet lawfully released. Attention is required; responsibility stays with NOC.',evidence:[['Diagnosis','Failed optic probable'],['Inventory','Compatible spare exists'],['Authority','Release pending'],['Field','Technician ready']],actions:['Request attention','Open inventory context','Review evidence'],timeline:[['08:18','Conflicting evidence reviewed','Prior fiber-path assessment weakened.'],['08:27','Compatible spare required','Material dependency became dominant.'],['08:50','Release authority needed','Attention requested; ownership retained.']]},
+ {id:'silence',title:'PT DEF — Broadband',purpose:'RESTORE_SERVICE',severity:'ok',meaning:'Recovery stable · customer silent',impact:'Network recovery indicated',impactSub:'No adverse telemetry after 36 min.',responsibility:'Sari / Customer Support',work:'Customer verification',workSub:'Two authorized contact attempts recorded.',blocker:'Waiting for customer response',aging:'Verification aging: 36 min',role:'Customer Verification',next:'Use next authorized contact path',why:'Silence is not confirmation. Contact attempts are work history, not customer-verification truth.',evidence:[['Technical','Recovery stable'],['Customer','No response yet'],['Attempt 1','Primary contact 10:04'],['Attempt 2','Alternate contact 10:18']],actions:['Contact alternate','Record attempt','Open service context'],timeline:[['09:43','Technical recovery indicated','Verification obligation opened.'],['10:04','Primary contact attempted','No state transition.'],['10:18','Alternate contact attempted','Verification remains pending.']]},
+ {id:'install',title:'PT Merdeka — New Service',purpose:'INSTALL_AND_ACTIVATE_SERVICE',severity:'warn',meaning:'Preview · activation readiness incomplete',impact:'New service not yet active',impactSub:'Purpose preview inside the same shared Core.',responsibility:'Rina / Provisioning',work:'Readiness qualification',workSub:'Commercial completeness confirmed.',blocker:'Waiting for CPE allocation',aging:'Readiness waiting: 3 h 14 min',role:'Provisioning Coordinator',next:'Resolve CPE allocation dependency',why:'This preview demonstrates another Purpose without forking the shared operational-control grammar.',evidence:[['Commercial','Complete'],['Feasibility','Pass'],['CPE','Allocation pending'],['Schedule','Not yet committed']],actions:['Open allocation','Request attention','Review readiness'],timeline:[['08:05','Order admitted','Purpose bound to installation.'],['08:22','Feasibility pass','Network path available.'],['08:31','CPE missing','Dependency waiting begins.']]}
+];
+let selected='abc';
+function getSit(){return situations.find(s=>s.id===selected)}
+function renderList(){
+  document.querySelector('#situationList').innerHTML=situations.map(s=>`<div class="sit ${s.id===selected?'active':''}" data-id="${s.id}"><div class="row"><div class="title"><span class="dot ${s.severity}"></span>${s.title}</div></div><div class="meta">${s.meaning}</div></div>`).join('');
+  document.querySelectorAll('.sit').forEach(x=>x.onclick=()=>{selected=x.dataset.id;renderOps()});
+}
+function renderOps(){
+  renderList(); const s=getSit();
+  const set=(id,v)=>document.getElementById(id).textContent=v;
+  set('crumb','Work Watch  /  '+s.purpose+'  /  Active Situation'); set('sitTitle',s.title);set('meaning',s.meaning);set('purpose',s.purpose);
+  set('impact',s.impact);set('impactSub',s.impactSub);set('responsibility',s.responsibility);set('work',s.work);set('workSub',s.workSub);set('blocker',s.blocker);set('aging',s.aging);
+  set('next',s.next);set('whyNext',s.why);set('resolvedRole',s.role+' · automatically resolved');
+  document.getElementById('evidence').innerHTML=s.evidence.map(([a,b])=>`<div>${a}</div><div>${b}</div>`).join('');
+  document.getElementById('actions').innerHTML=s.actions.map((a,i)=>`<button class="action ${i?'secondary':''}" data-action="${a}">${a}</button>`).join('');
+  document.querySelectorAll('.action').forEach(b=>b.onclick=()=>toast('Synthetic action: '+b.dataset.action+' — no real system changed.'));
+  document.getElementById('timeline').innerHTML=s.timeline.map(([t,b,d])=>`<div class="event"><time>${t}</time><i class="lineDot"></i><div><b>${b}</b><br><span>${d}</span></div></div>`).join('');
+}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x===b));
+  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===b.dataset.view));
+});
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(window.__tt);window.__tt=setTimeout(()=>t.classList.remove('show'),2600)}
+renderOps();
+
+const scenarios=[
+ {id:'restore',title:'Restore Service — end to end',steps:[
+   ['Customer report received','NOC Operator','See a new customer observation without assuming the cause.','Attention is a cue to look, not ownership transfer.'],
+   ['Evidence narrows the fault','NOC Operator','Review correlated evidence and make a bounded assessment.','The system preserves uncertainty and provenance.'],
+   ['Material blocker appears','NOC Operator','Recognize that more diagnostics will not clear the dominant dependency.','Activity must not be confused with progress.'],
+   ['Authority clears dependency','NOC Operator','Resume the field path without claiming recovery too early.','Blocker resolution changes one truth; service may still be degraded.'],
+   ['Network recovery indicated','Service Verification','Verify technical recovery from evidence.','Command, material effect and verification remain distinct.'],
+   ['Customer verification pending','Customer Verification','Confirm actual customer experience.','Technical recovery is not customer recovery.'],
+   ['Closure eligible','Closure Decision','Make the explicit closure decision.','Eligibility may be machine-evaluated; closure remains an authorized decision.']
+ ]},
+ {id:'handover',title:'Shift handover with unresolved blocker',steps:[
+   ['Outgoing duty reviews live work','NOC Operator','See unresolved situations and their aging.','Duty change does not erase operational truth.'],
+   ['Handover offered','NOC Operator','Offer responsibility with context.','Offer is not transfer.'],
+   ['Incoming holder accepts','NOC Operator','Accept responsibility explicitly.','Only accepted handover transfers responsibility.'],
+   ['Work continues','NOC Operator','Continue from inherited state and timers.','No artificial reset occurs at shift boundary.']
+ ]},
+ {id:'multi',title:'One human, multiple Roles',steps:[
+   ['Budi handles recovery','NOC Operator','Work the situation as NOC.','Budi holds several valid capacities concurrently.'],
+   ['Technical recovery needs verification','Service Verification','AppTS resolves the verification capacity automatically.','No manual Role mode is required when exactly one lawful context exists.'],
+   ['Customer truth required','Customer Verification','AppTS resolves the customer-verification capacity.','Same person, different lawful acting context; no handover.'],
+   ['Closure decision required','Closure Decision','AppTS binds the exact closure authority.','Audit records the exact capacity used for the material decision.']
+ ]}
+];
+let labId='restore',labStep=0;
+function renderLab(){
+ document.getElementById('scenarioList').innerHTML=scenarios.map(s=>`<div class="scenario ${s.id===labId?'active':''}" data-scenario="${s.id}"><b>${s.title}</b><div class="sub">${s.steps.length} synthetic stages</div></div>`).join('');
+ document.querySelectorAll('.scenario').forEach(x=>x.onclick=()=>{labId=x.dataset.scenario;labStep=0;renderLab()});
+ const sc=scenarios.find(s=>s.id===labId), step=sc.steps[labStep];
+ document.getElementById('labTitle').textContent=sc.title;
+ document.getElementById('labMeaning').textContent='Stage '+(labStep+1)+' of '+sc.steps.length+' · '+step[0];
+ document.getElementById('labRole').textContent=step[1]+' · resolved working context';
+ document.getElementById('labPrompt').textContent=step[2];
+ document.getElementById('labReason').textContent=step[3];
+ document.getElementById('stepLine').innerHTML=sc.steps.map((x,i)=>`<span class="step ${i<labStep?'done':i===labStep?'now':''}">${i+1}. ${x[0]}</span>`).join('');
+ document.getElementById('advance').textContent=labStep===sc.steps.length-1?'Scenario complete':'Run next synthetic event';
+}
+document.getElementById('advance').onclick=()=>{const sc=scenarios.find(s=>s.id===labId);if(labStep<sc.steps.length-1){labStep++;renderLab();toast('Synthetic world changed. Console projection recomputed.')}else toast('Scenario complete — reset or choose another scenario.')};
+document.getElementById('reset').onclick=()=>{labStep=0;renderLab();toast('Scenario reset.')};
+renderLab();
+</script>
+</body></html>
