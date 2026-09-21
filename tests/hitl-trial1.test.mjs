@@ -734,6 +734,12 @@ test("HITL-T21 crash after classifiable basis recovers exactly one stable A14 is
       JSON.stringify(a14Records[0].canonicalA14HistoricalBasis),
       a14Records[0].canonicalA14IdentityBytes,
     );
+    assert.deepEqual(a14Records[0].determiningIntegrityBasis, [{
+      evidenceId: "EV-HITL1-GOV",
+      integritySufficient: true,
+      integrityConflict: false,
+      integrityEvidenceRefs: ["EV-HITL1-INTEGRITY"],
+    }]);
 
     const postRecoveryHitl = createHitlTrial1Runtime({
       repository: restarted.repository,
@@ -797,6 +803,40 @@ test("HITL-T21 crash after classifiable basis recovers exactly one stable A14 is
       assert.equal(sha256Hex(fakeBytes), fakeDigest);
       verification.canonicalA14IdentityBytes = fakeBytes;
       verification.canonicalA14IdentityDigest = fakeDigest;
+    });
+
+    await expectCorruptA14History(({ verification }) => {
+      const fakeCanonicalBasis = clone(verification.canonicalA14HistoricalBasis);
+      fakeCanonicalBasis.governingEvidenceBasis[0].integritySufficient =
+        !fakeCanonicalBasis.governingEvidenceBasis[0].integritySufficient;
+      const fakeBytes = JSON.stringify(fakeCanonicalBasis);
+      verification.canonicalA14HistoricalBasis = fakeCanonicalBasis;
+      verification.canonicalA14IdentityBytes = fakeBytes;
+      verification.canonicalA14IdentityDigest = sha256Hex(fakeBytes);
+    });
+
+    await expectCorruptA14History(({ verification }) => {
+      verification.determiningIntegrityBasis[0].integrityConflict =
+        !verification.determiningIntegrityBasis[0].integrityConflict;
+    });
+
+    await expectCorruptA14History(({ verification }) => {
+      verification.determiningIntegrityBasis = [];
+    });
+
+    await expectCorruptA14History(({ verification }) => {
+      verification.determiningIntegrityBasis.push(
+        clone(verification.determiningIntegrityBasis[0]),
+      );
+    });
+
+    await expectCorruptA14History(({ verification }) => {
+      verification.determiningIntegrityBasis.push({
+        evidenceId: "EV-HITL1-INTEGRITY-ORPHAN",
+        integritySufficient: true,
+        integrityConflict: false,
+        integrityEvidenceRefs: ["EV-HITL1-INTEGRITY-ORPHAN-WITNESS"],
+      });
     });
 
     await expectCorruptA14History(({ verification }) => {
