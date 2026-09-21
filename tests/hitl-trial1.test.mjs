@@ -347,12 +347,21 @@ test("HITL-T09 RS-A-014 is deterministic machine evaluation with no human Acting
     await runtime.execute(humanCommand(scenario, "RS-A-012", "VERIFIED_OK", 1, "CMD-HITL-T09-A12"));
     await runtime.execute(humanCommand(scenario, "RS-A-013", "CONFIRMED_OK", 2, "CMD-HITL-T09-A13"));
     const snapshot = await runtime.repository.load(scenario.scopeBaseline.scopeRef);
-    const a14 = snapshot.actionExecutions.find((item) => item.responseRef?.startsWith("HITL1:RS-A-014:"));
+    const a14Record = snapshot.verificationClosureEffects.find((item) => item.actionId === "RS-A-014");
+    assert.ok(a14Record);
+    assert.equal(a14Record.closureEligibilityRef, "HITL1:CLOSURE_ELIGIBILITY:ELIGIBLE");
+    assert.equal(a14Record.serviceVerificationRef, undefined);
+    assert.equal(a14Record.customerVerificationRef, undefined);
+    assert.equal(a14Record.closureDecisionRef, undefined);
+    const a14 = snapshot.actionExecutions.find((item) => item.commandId === a14Record.determiningCommandId);
     assert.ok(a14);
     assert.equal(a14.executorRef, "MACHINE-HITL1-RS-A014");
+    assert.equal(a14.responseRef, a14Record.recordRef);
+    assert.notEqual(a14.responseRef, a14Record.closureEligibilityRef);
     const view = await runtime.buildOperatorView("CTX-HITL1-RECOVERY");
     assert.equal(view.actions["RS-A-014"].mode, "DETERMINISTIC_MACHINE");
     assert.equal(view.actions["RS-A-014"].boundedMachineAuthorityRef, "BMA-HITL1-RS-A014");
+    assert.equal(view.verification.closureEligibilityRef, a14Record.closureEligibilityRef);
   });
 });
 
@@ -481,10 +490,17 @@ test("HITL-T19 A14 replay is single-effect and deterministic identity is collisi
     const hitl = createHitlTrial1Runtime({ repository: runtime.repository, scenario, clock, ids });
     const identity = await hitl.buildA14Identity(snapshot);
     assert.ok(identity);
+
+    const a14Record = snapshot.verificationClosureEffects.find((item) => item.actionId === "RS-A-014");
+    assert.ok(a14Record);
+    assert.equal(a14Record.canonicalA14IdentityBytes, identity.canonicalBytes);
+    assert.equal(a14Record.canonicalA14IdentityDigest, identity.digest);
+    assert.equal(a14Record.canonicalA14GoverningBasisVersion, identity.governingBasisVersion);
+
     const beforeExecutions = snapshot.actionExecutions.length;
     const replay = await runtime.execute(identity.envelope);
     assert.equal(replay.kind, "REPLAY");
-    assert.equal(replay.execution.responseRef?.startsWith("HITL1:RS-A-014:ELIGIBLE:"), true);
+    assert.equal(replay.execution.responseRef, a14Record.recordRef);
     assert.equal((await runtime.repository.load(scenario.scopeBaseline.scopeRef)).actionExecutions.length, beforeExecutions);
 
     const policyChanged = clone(scenario);
@@ -492,6 +508,23 @@ test("HITL-T19 A14 replay is single-effect and deterministic identity is collisi
     assert.notEqual(
       buildIdentityCanonicalBytes(snapshot, policyChanged, identity.governingBasisVersion),
       identity.canonicalBytes,
+    );
+
+    const collisionRuntime = createHitlTrial1Runtime({
+      repository: runtime.repository,
+      scenario: policyChanged,
+      clock: { now: () => "2026-09-21T00:00:21.000Z" },
+      ids: { next: (kind) => `${kind}-T19-COLLISION` },
+    });
+    await assert.rejects(
+      () => collisionRuntime.execute(identity.envelope),
+      /A14_IDENTITY_COLLISION_OR_REPLAY_CONFLICT/,
+    );
+    const afterCollision = await runtime.repository.load(scenario.scopeBaseline.scopeRef);
+    assert.equal(afterCollision.actionExecutions.length, beforeExecutions);
+    assert.equal(
+      afterCollision.verificationClosureEffects.filter((item) => item.actionId === "RS-A-014").length,
+      1,
     );
 
     const currentnessChanged = clone(scenario);
