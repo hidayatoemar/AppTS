@@ -1,0 +1,312 @@
+{
+  "schemaVersion": "HITL1-RUNTIME-1",
+  "syntheticTrial": true,
+  "trialId": "TRIAL-LOCAL-001",
+  "scenarioId": "S01_SUCCESS_REQUIRED",
+  "scopeBaseline": {
+    "scopeRef": {
+      "situationId": "SIT-HITL1-001",
+      "subjectType": "SERVICE",
+      "subjectId": "SVC-HITL1-001"
+    },
+    "version": 0,
+    "truthRefs": ["TRUTH-HITL1-DOWN"],
+    "evidenceRefs": ["EV-HITL1-GOV"],
+    "responsibility": {
+      "responsibilityRef": "RESP-HITL1-001",
+      "scopeRef": {
+        "situationId": "SIT-HITL1-001",
+        "subjectType": "SERVICE",
+        "subjectId": "SVC-HITL1-001"
+      },
+      "holderPersonRef": "PERSON-STAGING-001",
+      "roleRef": "ROLE-HITL1-RECOVERY",
+      "assignmentRef": "ASG-HITL1-RECOVERY",
+      "dutyRef": "DUTY-HITL1-001",
+      "availabilityRef": "AVAIL-HITL1-001",
+      "authorityBasisRef": "AUTH-RS-A022",
+      "effectiveTime": "2026-09-21T00:00:00.000Z",
+      "currentness": {
+        "status": "CURRENT",
+        "basisRef": "EV-HITL1-CURRENT"
+      },
+      "provenance": {
+        "sourceRefs": ["EV-HITL1-GOV"],
+        "chainRefs": []
+      }
+    },
+    "actingContextCandidates": [
+      {
+        "contextRef": "CTX-HITL1-RECOVERY",
+        "personRef": "PERSON-STAGING-001",
+        "roleRef": "ROLE-HITL1-RECOVERY",
+        "assignmentRef": "ASG-HITL1-RECOVERY",
+        "availabilityRef": "AVAIL-HITL1-001",
+        "responsibilityRef": "RESP-HITL1-001",
+        "authorityBasisRef": "AUTH-RS-A022",
+        "scopeRef": {
+          "situationId": "SIT-HITL1-001",
+          "subjectType": "SERVICE",
+          "subjectId": "SVC-HITL1-001"
+        },
+        "validity": {
+          "conditionRef": "COND-HITL1-VALID",
+          "satisfied": true,
+          "evidenceRefs": ["EV-HITL1-GOV"]
+        },
+        "applicability": {
+          "conditionRef": "COND-HITL1-APPLICABLE",
+          "satisfied": true,
+          "evidenceRefs": ["EV-HITL1-GOV"]
+        },
+        "currentness": {
+          "status": "CURRENT",
+          "basisRef": "EV-HITL1-CURRENT"
+        },
+        "integrity": {
+          "sufficient": true,
+          "conflict": false,
+          "evidenceRefs": ["EV-HITL1-INTEGRITY"]
+        },
+        "provenance": {
+          "sourceRefs": ["EV-HITL1-GOV"],
+          "chainRefs": []
+        }
+      },
+      {
+        "contextRef": "CTX-HITL1-SERVICE-VERIFICATION",
+        "personRef": "PERSON-STAGING-001",
+        "roleRef": "ROLE-HITL1-SERVICE-VERIFICATION",
+        "assignmentRef": "ASG-HITL1-SERVICE-VERIFICATION",
+        "availabilityRef": "AVAIL-HITL1-001",
+        "responsibilityRef": "RESP-HITL1-001",
+        "authorityBasisRef": "AUTH-HITL1-RS-A012",
+        "scopeRef": {
+          "situationId": "SIT-HITL1-001",
+          "subjectType": "SERVICE",
+          "subjectId": "SVC-HITL1-001"
+        },
+        "validity": {
+          "conditionRef": "COND-HITL1-VALID",
+          "satisfied": true,
+          "evidenceRefs": ["EV-HITL1-GOV"]
+        },
+        "applicability": {
+          "conditionRef": "COND-HITL1-APPLICABLE",
+          "satisfied": true,
+          "evidenceRefs": ["EV-HITL1-GOV"]
+        },
+        "currentness": {
+          "status": "CURRENT",
+          "basisRef": "EV-HITL1-CURRENT"
+        },
+        "integrity": {
+          "sufficient": true,
+          "conflict": false,
+          "evidenceRefs": ["EV-HITL1-INTEGRITY"]
+        },
+        "provenance": {
+          "sourceRefs": ["EV-HITL1-GOV"],
+          "chainRefs": []
+        }
+      },
+      {
+        "contextRef": "CTX-HITL1-CUSTOMER-VERIFICATION",
+        "personRef": "PERSON-STAGING-001",
+        "roleRef": "ROLE-HITL1-CUSTOMER-VERIFICATION",
+        "assignmentRef": "ASG-HITL1-CUSTOMER-VERIFICATION",
+        "availabilityRef": "AVAIL-HITL1-001",
+        "responsibilityRef": "RESP-HITL1-001",
+        "authorityBasisRef": "AUTH-HITL1-RS-A013",
+        "scopeRef": {
+          "situationId": "SIT-HITL1-001",
+          "subjectType": "SERVICE",
+          "subjectId": "SVC-HITL1-001"
+        },
+        "validity": {
+          "conditionRef": "COND-HITL1-VALID",
+          "satisfied": true,
+          "evidenceRefs": ["EV-HITL1-GOV"]
+        },
+        "applicability": {
+          "conditionRef": "COND-HITL1-APPLICABLE",
+          "satisfied": true,
+          "evidenceRefs": ["EV-HITL1-GOV"]
+        },
+        "currentness": {
+          "status": "CURRENT",
+          "basisRef": "EV-HITL1-CURRENT"
+        },
+        "integrity": {
+          "sufficient": true,
+          "conflict": false,
+          "evidenceRefs": ["EV-HITL1-INTEGRITY"]
+        },
+        "provenance": {
+          "sourceRefs": ["EV-HITL1-GOV"],
+          "chainRefs": []
+        }
+      },
+      {
+        "contextRef": "CTX-HITL1-CLOSURE-DECISION",
+        "personRef": "PERSON-STAGING-001",
+        "roleRef": "ROLE-HITL1-CLOSURE-DECISION",
+        "assignmentRef": "ASG-HITL1-CLOSURE-DECISION",
+        "availabilityRef": "AVAIL-HITL1-001",
+        "responsibilityRef": "RESP-HITL1-001",
+        "authorityBasisRef": "AUTH-HITL1-RS-A015",
+        "scopeRef": {
+          "situationId": "SIT-HITL1-001",
+          "subjectType": "SERVICE",
+          "subjectId": "SVC-HITL1-001"
+        },
+        "validity": {
+          "conditionRef": "COND-HITL1-VALID",
+          "satisfied": true,
+          "evidenceRefs": ["EV-HITL1-GOV"]
+        },
+        "applicability": {
+          "conditionRef": "COND-HITL1-APPLICABLE",
+          "satisfied": true,
+          "evidenceRefs": ["EV-HITL1-GOV"]
+        },
+        "currentness": {
+          "status": "CURRENT",
+          "basisRef": "EV-HITL1-CURRENT"
+        },
+        "integrity": {
+          "sufficient": true,
+          "conflict": false,
+          "evidenceRefs": ["EV-HITL1-INTEGRITY"]
+        },
+        "provenance": {
+          "sourceRefs": ["EV-HITL1-GOV"],
+          "chainRefs": []
+        }
+      }
+    ],
+    "dependencyRefs": [],
+    "actionExecutions": [],
+    "materialEffects": [],
+    "evidenceProvenance": [],
+    "responsibilityHandoverEffects": [],
+    "dependencyWaitingUpdates": [],
+    "residualObligationRefs": [],
+    "verificationClosureEffects": [],
+    "otherAuthoritativeP01ToP10Records": []
+  },
+  "personRef": "PERSON-STAGING-001",
+  "responsibilityRef": "RESP-HITL1-001",
+  "actingContexts": [
+    {
+      "actingContextRef": "CTX-HITL1-RECOVERY",
+      "actionId": "RS-A-022",
+      "requiredAuthorityRef": "AUTH-RS-A022",
+      "candidate": {
+        "contextRef": "CTX-HITL1-RECOVERY",
+        "personRef": "PERSON-STAGING-001",
+        "roleRef": "ROLE-HITL1-RECOVERY",
+        "assignmentRef": "ASG-HITL1-RECOVERY",
+        "availabilityRef": "AVAIL-HITL1-001",
+        "responsibilityRef": "RESP-HITL1-001",
+        "authorityBasisRef": "AUTH-RS-A022",
+        "scopeRef": {"situationId": "SIT-HITL1-001", "subjectType": "SERVICE", "subjectId": "SVC-HITL1-001"},
+        "validity": {"conditionRef": "COND-HITL1-VALID", "satisfied": true, "evidenceRefs": ["EV-HITL1-GOV"]},
+        "applicability": {"conditionRef": "COND-HITL1-APPLICABLE", "satisfied": true, "evidenceRefs": ["EV-HITL1-GOV"]},
+        "currentness": {"status": "CURRENT", "basisRef": "EV-HITL1-CURRENT"},
+        "integrity": {"sufficient": true, "conflict": false, "evidenceRefs": ["EV-HITL1-INTEGRITY"]},
+        "provenance": {"sourceRefs": ["EV-HITL1-GOV"], "chainRefs": []}
+      }
+    },
+    {
+      "actingContextRef": "CTX-HITL1-SERVICE-VERIFICATION",
+      "actionId": "RS-A-012",
+      "requiredAuthorityRef": "AUTH-HITL1-RS-A012",
+      "candidate": {
+        "contextRef": "CTX-HITL1-SERVICE-VERIFICATION",
+        "personRef": "PERSON-STAGING-001",
+        "roleRef": "ROLE-HITL1-SERVICE-VERIFICATION",
+        "assignmentRef": "ASG-HITL1-SERVICE-VERIFICATION",
+        "availabilityRef": "AVAIL-HITL1-001",
+        "responsibilityRef": "RESP-HITL1-001",
+        "authorityBasisRef": "AUTH-HITL1-RS-A012",
+        "scopeRef": {"situationId": "SIT-HITL1-001", "subjectType": "SERVICE", "subjectId": "SVC-HITL1-001"},
+        "validity": {"conditionRef": "COND-HITL1-VALID", "satisfied": true, "evidenceRefs": ["EV-HITL1-GOV"]},
+        "applicability": {"conditionRef": "COND-HITL1-APPLICABLE", "satisfied": true, "evidenceRefs": ["EV-HITL1-GOV"]},
+        "currentness": {"status": "CURRENT", "basisRef": "EV-HITL1-CURRENT"},
+        "integrity": {"sufficient": true, "conflict": false, "evidenceRefs": ["EV-HITL1-INTEGRITY"]},
+        "provenance": {"sourceRefs": ["EV-HITL1-GOV"], "chainRefs": []}
+      }
+    },
+    {
+      "actingContextRef": "CTX-HITL1-CUSTOMER-VERIFICATION",
+      "actionId": "RS-A-013",
+      "requiredAuthorityRef": "AUTH-HITL1-RS-A013",
+      "candidate": {
+        "contextRef": "CTX-HITL1-CUSTOMER-VERIFICATION",
+        "personRef": "PERSON-STAGING-001",
+        "roleRef": "ROLE-HITL1-CUSTOMER-VERIFICATION",
+        "assignmentRef": "ASG-HITL1-CUSTOMER-VERIFICATION",
+        "availabilityRef": "AVAIL-HITL1-001",
+        "responsibilityRef": "RESP-HITL1-001",
+        "authorityBasisRef": "AUTH-HITL1-RS-A013",
+        "scopeRef": {"situationId": "SIT-HITL1-001", "subjectType": "SERVICE", "subjectId": "SVC-HITL1-001"},
+        "validity": {"conditionRef": "COND-HITL1-VALID", "satisfied": true, "evidenceRefs": ["EV-HITL1-GOV"]},
+        "applicability": {"conditionRef": "COND-HITL1-APPLICABLE", "satisfied": true, "evidenceRefs": ["EV-HITL1-GOV"]},
+        "currentness": {"status": "CURRENT", "basisRef": "EV-HITL1-CURRENT"},
+        "integrity": {"sufficient": true, "conflict": false, "evidenceRefs": ["EV-HITL1-INTEGRITY"]},
+        "provenance": {"sourceRefs": ["EV-HITL1-GOV"], "chainRefs": []}
+      }
+    },
+    {
+      "actingContextRef": "CTX-HITL1-CLOSURE-DECISION",
+      "actionId": "RS-A-015",
+      "requiredAuthorityRef": "AUTH-HITL1-RS-A015",
+      "candidate": {
+        "contextRef": "CTX-HITL1-CLOSURE-DECISION",
+        "personRef": "PERSON-STAGING-001",
+        "roleRef": "ROLE-HITL1-CLOSURE-DECISION",
+        "assignmentRef": "ASG-HITL1-CLOSURE-DECISION",
+        "availabilityRef": "AVAIL-HITL1-001",
+        "responsibilityRef": "RESP-HITL1-001",
+        "authorityBasisRef": "AUTH-HITL1-RS-A015",
+        "scopeRef": {"situationId": "SIT-HITL1-001", "subjectType": "SERVICE", "subjectId": "SVC-HITL1-001"},
+        "validity": {"conditionRef": "COND-HITL1-VALID", "satisfied": true, "evidenceRefs": ["EV-HITL1-GOV"]},
+        "applicability": {"conditionRef": "COND-HITL1-APPLICABLE", "satisfied": true, "evidenceRefs": ["EV-HITL1-GOV"]},
+        "currentness": {"status": "CURRENT", "basisRef": "EV-HITL1-CURRENT"},
+        "integrity": {"sufficient": true, "conflict": false, "evidenceRefs": ["EV-HITL1-INTEGRITY"]},
+        "provenance": {"sourceRefs": ["EV-HITL1-GOV"], "chainRefs": []}
+      }
+    }
+  ],
+  "initialActiveActingContextRef": "CTX-HITL1-RECOVERY",
+  "evidenceBasis": {
+    "basisRef": "BASIS-HITL1-GOV",
+    "evidence": [
+      {
+        "evidenceId": "EV-HITL1-GOV",
+        "sourceType": "SYNTHETIC_TRIAL",
+        "sourceRef": "SRC-HITL1-GOV",
+        "actorOrSystemRef": "SYSTEM-HITL1-FIXTURE",
+        "receivedTime": "2026-09-21T00:00:00.000Z",
+        "currentness": {"status": "CURRENT", "basisRef": "EV-HITL1-CURRENT"},
+        "payloadOrRecordRef": "PAYLOAD-HITL1-GOV",
+        "provenanceChain": []
+      }
+    ],
+    "integrityAssessments": [
+      {
+        "evidenceId": "EV-HITL1-GOV",
+        "assessment": {
+          "sufficient": true,
+          "conflict": false,
+          "evidenceRefs": ["EV-HITL1-INTEGRITY"]
+        }
+      }
+    ],
+    "policyBasisRefs": ["POLICY-HITL1-CLOSURE"]
+  },
+  "customerVerificationApplicability": "REQUIRED",
+  "customerVerificationApplicabilityPolicyBasisRef": "POLICY-HITL1-CUSTOMER-REQUIRED",
+  "residualObligations": []
+}

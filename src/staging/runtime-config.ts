@@ -10,6 +10,12 @@ import type {
   ScopeRef,
 } from "../contracts/ce-di.js";
 import type { ScopeSnapshot } from "../runtime/runtime-composition.js";
+import {
+  HITL_RUNTIME_PROFILE,
+  HITL_SCENARIO_PATH,
+  type HitlTrial1RuntimeScenario,
+  validateHitlTrial1ScenarioObject,
+} from "./hitl-trial1-contracts.js";
 
 export const RUNTIME_PROFILE = "SYNTHETIC_TRIAL_LOCAL_ONLY" as const;
 export const LOOPBACK_ADDRESS = "127.0.0.1" as const;
@@ -33,11 +39,12 @@ export const REGRESSION_GATES = Object.freeze({
 });
 
 export interface LocalRuntimeConfig {
-  profile: typeof RUNTIME_PROFILE;
+  profile: typeof RUNTIME_PROFILE | typeof HITL_RUNTIME_PROFILE;
   bindAddress: typeof LOOPBACK_ADDRESS;
   port: number;
   dataDir: string;
   trialFixturePath: typeof TRIAL_FIXTURE_PATH;
+  hitlScenarioPath?: typeof HITL_SCENARIO_PATH;
 }
 
 export interface SyntheticOutcomeInstance {
@@ -60,6 +67,7 @@ export interface SyntheticTrialFixture {
 export interface LoadedLocalRuntimeConfig {
   config: LocalRuntimeConfig;
   fixture: SyntheticTrialFixture;
+  hitlScenario?: HitlTrial1RuntimeScenario;
 }
 
 export async function loadLocalRuntimeConfig(configPath: string): Promise<LoadedLocalRuntimeConfig> {
@@ -68,14 +76,27 @@ export async function loadLocalRuntimeConfig(configPath: string): Promise<Loaded
   const config = validateRuntimeConfigObject(configRaw);
   const fixtureRaw = JSON.parse(await readFile(config.trialFixturePath, "utf8")) as unknown;
   const fixture = validateSyntheticTrialFixtureObject(fixtureRaw);
+  if (config.profile === HITL_RUNTIME_PROFILE) {
+    if (config.hitlScenarioPath !== HITL_SCENARIO_PATH) throw new Error("HITL_SCENARIO_PATH_REQUIRED");
+    const scenarioRaw = JSON.parse(await readFile(config.hitlScenarioPath, "utf8")) as unknown;
+    const hitlScenario = validateHitlTrial1ScenarioObject(scenarioRaw);
+    if (hitlScenario.trialId !== fixture.trialId) throw new Error("HITL_FIXTURE_TRIAL_ID_MISMATCH");
+    return { config, fixture, hitlScenario };
+  }
   return { config, fixture };
 }
 
 export function validateRuntimeConfigObject(value: unknown): LocalRuntimeConfig {
   const record = asRecord(value, "INVALID_RUNTIME_CONFIG");
-  assertExactKeys(record, ["profile", "bindAddress", "port", "dataDir", "trialFixturePath"]);
+  const profile = record.profile;
+  if (profile === RUNTIME_PROFILE) {
+    assertExactKeys(record, ["profile", "bindAddress", "port", "dataDir", "trialFixturePath"]);
+  } else if (profile === HITL_RUNTIME_PROFILE) {
+    assertExactKeys(record, ["profile", "bindAddress", "port", "dataDir", "trialFixturePath", "hitlScenarioPath"]);
+  } else {
+    throw new Error("INVALID_RUNTIME_PROFILE");
+  }
 
-  if (record.profile !== RUNTIME_PROFILE) throw new Error("INVALID_RUNTIME_PROFILE");
   if (record.bindAddress !== LOOPBACK_ADDRESS) throw new Error("NON_LOOPBACK_BIND_REJECTED");
   if (!Number.isInteger(record.port) || typeof record.port !== "number" || record.port < 1024 || record.port > 65535) {
     throw new Error("INVALID_RUNTIME_PORT");
@@ -84,13 +105,17 @@ export function validateRuntimeConfigObject(value: unknown): LocalRuntimeConfig 
     throw new Error("INVALID_RUNTIME_DATA_DIR");
   }
   if (record.trialFixturePath !== TRIAL_FIXTURE_PATH) throw new Error("INVALID_TRIAL_FIXTURE_PATH");
+  if (profile === HITL_RUNTIME_PROFILE && record.hitlScenarioPath !== HITL_SCENARIO_PATH) {
+    throw new Error("INVALID_HITL_SCENARIO_PATH");
+  }
 
   return {
-    profile: RUNTIME_PROFILE,
+    profile,
     bindAddress: LOOPBACK_ADDRESS,
     port: record.port,
     dataDir: record.dataDir,
     trialFixturePath: TRIAL_FIXTURE_PATH,
+    ...(profile === HITL_RUNTIME_PROFILE ? { hitlScenarioPath: HITL_SCENARIO_PATH } : {}),
   };
 }
 
