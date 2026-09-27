@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AppTS RESTORE_SERVICE — HFP Vertical Slice</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif}body{margin:0;background:#f5f7fa;color:#1f2937}.top{padding:16px 20px;background:white;border-bottom:1px solid #d9dee7;display:flex;gap:16px;justify-content:space-between;align-items:center;position:sticky;top:0}.brand b{font-size:18px}.muted{color:#667085;font-size:12px}.wrap{max-width:1200px;margin:0 auto;padding:18px}.controls{display:flex;gap:8px;flex-wrap:wrap}.controls button,.controls select{padding:8px 10px;border:1px solid #cfd6df;background:white;border-radius:8px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{background:white;border:1px solid #d9dee7;border-radius:12px;padding:14px}.full{grid-column:1/-1}.label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#667085}.value{font-weight:650;margin-top:5px}.next{background:#f0f7ff;border-color:#b8d7f3}.next button{margin-top:10px;padding:9px 12px;border:0;border-radius:8px;background:#1f6ea9;color:white}.track{display:grid;grid-template-columns:150px 1fr 70px;gap:8px;padding:8px 0;border-bottom:1px solid #eef1f4}.track:last-child{border:0}.timeline{display:grid;gap:8px}.event{border-left:3px solid #b9c7d6;padding-left:10px}.event b{display:block}.source{font-size:12px;color:#667085}.pill{display:inline-block;padding:3px 7px;border:1px solid #d7dde5;border-radius:999px;margin:2px;font-size:12px}@media(max-width:760px){.grid{grid-template-columns:1fr}.full{grid-column:auto}.track{grid-template-columns:110px 1fr}}
+</style>
+</head>
+<body>
+<div class="top"><div class="brand"><b>AppTS — RESTORE_SERVICE</b><div class="muted">Working HFP-based vertical slice · synthetic scenario only</div></div><div id="version" class="muted"></div></div>
+<div class="wrap">
+  <div class="controls"><select id="scenario"><option value="material">Material dependency → recovery → closure</option><option value="access">Site-access blocker</option><option value="handover">Responsibility handover</option></select><button id="reset">Reset</button></div>
+  <h2 id="title"></h2><div class="muted" id="actor"></div>
+  <div class="grid">
+    <div class="card full next"><div class="label">Next governed event</div><div class="value" id="next"></div><button id="advance">Apply next event</button></div>
+    <div class="card full"><div class="label">Parallel operational truths</div><div id="tracks"></div></div>
+    <div class="card"><div class="label">Latest evidence</div><div id="evidence"></div></div>
+    <div class="card"><div class="label">Hard semantic guards</div><div id="invariants"></div></div>
+    <div class="card full"><div class="label">Chronology</div><div class="timeline" id="chronology"></div></div>
+    <div class="card full"><div class="label">Validated HFP source</div><div class="source" id="sources"></div></div>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);let state;
+async function api(path,options){const r=await fetch(path,options);const b=await r.json();if(!r.ok)throw new Error(b.error||r.statusText);return b}
+async function load(){state=await api('/api/state');render()}
+function render(){
+ $('title').textContent=state.title;$('version').textContent='State v'+state.version+' · '+state.clock;
+ $('actor').textContent=`Current responsibility: ${state.tracks.responsibility.holder} / ${state.tracks.responsibility.role} · Purpose ${state.purpose}`;
+ $('next').textContent=state.nextEventLabel||'Scenario complete';$('advance').disabled=!state.nextEventId;
+ $('tracks').innerHTML=Object.entries(state.tracks).map(([k,v])=>`<div class="track"><b>${esc(k)}</b><span>${esc(v.state||v.holder||'')}</span><small>${esc(v.since||'')}</small></div>`).join('');
+ $('evidence').innerHTML=state.evidence.slice(-6).reverse().map(x=>`<p><b>${esc(x.at)} · ${esc(x.kind)}</b><br>${esc(x.text)}</p>`).join('')||'<p class="muted">No evidence yet.</p>';
+ $('invariants').innerHTML=state.invariants.map(x=>`<span class="pill">${esc(x)}</span>`).join('');
+ $('chronology').innerHTML=state.chronology.map(x=>`<div class="event"><b>${esc(x.at)} — ${esc(x.event)}</b><span class="muted">Changed: ${esc(x.changedTracks.length?x.changedTracks.join(', '):'none / no-transition')}</span></div>`).join('');
+ $('sources').innerHTML=`Narrative: ${esc(state.source.narrative.title)} — File ID ${esc(state.source.narrative.id)}<br>STG: ${esc(state.source.stg.title)} — File ID ${esc(state.source.stg.id)}`;
+ $('scenario').value=state.scenario;
+}
+$('advance').onclick=async()=>{try{state=await api('/api/next',{method:'POST'});render()}catch(e){alert(e.message)}};
+$('reset').onclick=async()=>{state=await api('/api/reset',{method:'POST'});render()};
+$('scenario').onchange=async e=>{state=await api('/api/scenario',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({scenario:e.target.value})});render()};
+function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+load();
+</script>
+</body></html>
