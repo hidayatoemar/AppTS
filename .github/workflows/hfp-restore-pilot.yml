@@ -1,0 +1,194 @@
+name: hfp-restore-pilot
+
+on:
+  push:
+    branches: [ai/hfp-restore-vertical-slice]
+    paths:
+      - 'pilot/restore-service/**'
+      - '.github/workflows/hfp-restore-pilot.yml'
+
+concurrency:
+  group: hfp-restore-pilot
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-deploy:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run repository verification
+        run: |
+          set -euo pipefail
+          npm install --ignore-scripts --no-audit --no-fund
+          npm test
+
+      - name: Package pilot and tunnel binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f pilot/restore-service/index.html
+          test -f pilot/restore-service/server.mjs
+          test -f pilot/restore-service/model.mjs
+          tar -czf "$RUNNER_TEMP/appts-hfp-restore-pilot.tar.gz" -C pilot/restore-service .
+          curl -fsSL --retry 3 https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o "$RUNNER_TEMP/cloudflared"
+          chmod +x "$RUNNER_TEMP/cloudflared"
+
+      - name: Prepare pinned SSH identity
+        shell: bash
+        env:
+          APPTS_STAGING_SSH_PRIVATE_KEY: ${{ secrets.APPTS_STAGING_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "${APPTS_STAGING_SSH_PRIVATE_KEY:-}"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$APPTS_STAGING_SSH_PRIVATE_KEY" > "$HOME/.ssh/appts_staging"
+          chmod 600 "$HOME/.ssh/appts_staging"
+          cat > "$HOME/.ssh/known_hosts" <<'EOF'
+          103.127.99.11 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILpRJVkwh143CmmrMkQvgfNyRIbV964SsAYLZ3BlaGdh
+          EOF
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Deploy isolated HFP RESTORE pilot
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSH_OPTS=(
+            -i "$HOME/.ssh/appts_staging"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+            -o ConnectTimeout=12
+          )
+
+          scp "${SSH_OPTS[@]}" "$RUNNER_TEMP/appts-hfp-restore-pilot.tar.gz" "$RUNNER_TEMP/cloudflared" appts-mcr@103.127.99.11:/tmp/
+
+          ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          sudo install -d -m 0755 /opt/appts-hfp-restore-pilot
+          sudo rm -rf /opt/appts-hfp-restore-pilot/current.new
+          sudo install -d -m 0755 /opt/appts-hfp-restore-pilot/current.new
+          sudo tar -xzf /tmp/appts-hfp-restore-pilot.tar.gz -C /opt/appts-hfp-restore-pilot/current.new
+
+          if [ -d /opt/appts-hfp-restore-pilot/current ]; then
+            sudo rm -rf /opt/appts-hfp-restore-pilot/previous
+            sudo mv /opt/appts-hfp-restore-pilot/current /opt/appts-hfp-restore-pilot/previous
+          fi
+          sudo mv /opt/appts-hfp-restore-pilot/current.new /opt/appts-hfp-restore-pilot/current
+          sudo chmod -R a+rX /opt/appts-hfp-restore-pilot/current
+
+          cat >/tmp/appts-hfp-restore-pilot.service <<'UNIT'
+          [Unit]
+          Description=AppTS HFP RESTORE Synthetic Pilot
+          After=network.target
+
+          [Service]
+          Type=simple
+          WorkingDirectory=/opt/appts-hfp-restore-pilot/current
+          Environment=PORT=8090
+          Environment=BIND=127.0.0.1
+          ExecStart=/usr/bin/node /opt/appts-hfp-restore-pilot/current/server.mjs
+          Restart=on-failure
+          RestartSec=2
+          NoNewPrivileges=true
+          PrivateTmp=true
+          ProtectSystem=strict
+          ProtectHome=true
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          cat >/tmp/appts-hfp-restore-pilot-tunnel.service <<'UNIT'
+          [Unit]
+          Description=AppTS HFP RESTORE Pilot Browser Tunnel
+          After=network-online.target appts-hfp-restore-pilot.service
+          Wants=network-online.target
+          Requires=appts-hfp-restore-pilot.service
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8090
+          Restart=always
+          RestartSec=5
+          NoNewPrivileges=true
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          sudo install -m 0644 /tmp/appts-hfp-restore-pilot.service /etc/systemd/system/appts-hfp-restore-pilot.service
+          sudo install -m 0644 /tmp/appts-hfp-restore-pilot-tunnel.service /etc/systemd/system/appts-hfp-restore-pilot-tunnel.service
+          sudo install -m 0755 /tmp/cloudflared /usr/local/bin/cloudflared
+          sudo systemctl daemon-reload
+          sudo systemctl enable --now appts-hfp-restore-pilot.service
+          sudo systemctl restart appts-hfp-restore-pilot.service
+
+          for n in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8090/api/state >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8090/api/state >/dev/null
+
+          sudo systemctl enable --now appts-hfp-restore-pilot-tunnel.service
+          sudo systemctl restart appts-hfp-restore-pilot-tunnel.service
+          invocation="$(sudo systemctl show -p InvocationID --value appts-hfp-restore-pilot-tunnel.service)"
+          test -n "$invocation"
+
+          url=""
+          for n in $(seq 1 30); do
+            url="$(sudo journalctl _SYSTEMD_INVOCATION_ID="$invocation" --no-pager -n 120 | grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true)"
+            if [ -n "$url" ]; then break; fi
+            sleep 2
+          done
+          test -n "$url"
+          printf '%s\n' "$url" | sudo tee /opt/appts-hfp-restore-pilot/PUBLIC_URL >/dev/null
+
+          rm -f /tmp/appts-hfp-restore-pilot.tar.gz /tmp/cloudflared /tmp/appts-hfp-restore-pilot.service /tmp/appts-hfp-restore-pilot-tunnel.service
+          REMOTE
+
+          url="$(ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 'cat /opt/appts-hfp-restore-pilot/PUBLIC_URL')"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Verify public browser path
+        shell: bash
+        env:
+          PUBLIC_PILOT_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          set -euo pipefail
+          test -n "$PUBLIC_PILOT_URL"
+          for n in $(seq 1 20); do
+            if curl -fsS --max-time 10 "$PUBLIC_PILOT_URL/api/state" | grep -F '"purpose":"RESTORE_SERVICE"' >/dev/null; then
+              echo "hfp_restore_public_trial=PASS"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "hfp_restore_public_trial=FAIL" >&2
+          exit 1
+
+      - name: Record current trial URL
+        env:
+          PUBLIC_PILOT_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          set -euo pipefail
+          mkdir -p deployment
+          printf '%s\n' "$PUBLIC_PILOT_URL" > deployment/hfp-restore-pilot-url.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deployment/hfp-restore-pilot-url.txt
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Record current HFP RESTORE pilot URL"
+          git push

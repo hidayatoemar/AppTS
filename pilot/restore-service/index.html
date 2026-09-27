@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AppTS — HFP RESTORE Pilot</title>
+<style>
+:root{--bg:#f4f7fa;--panel:#fff;--line:#dbe4ec;--text:#17212b;--muted:#64788b;--blue:#16689a;--blue2:#eaf5fb;--amber2:#fff6e5;--green:#147347;--green2:#e9f7f0;--red:#9b3434;--red2:#fceeee;--shadow:0 8px 24px rgba(22,48,72,.07)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}button,select,input{font:inherit}
+header{background:#fff;border-bottom:1px solid var(--line);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:18px;position:sticky;top:0;z-index:3}
+.brand b{font-size:18px}.brand span{display:block;color:var(--muted);font-size:12px}.trial{font-size:12px;padding:5px 9px;border:1px solid #e8c576;background:var(--amber2);color:#7a5207;border-radius:999px;font-weight:650}
+.actor{display:flex;align-items:center;gap:8px}.actor label{color:var(--muted);font-size:12px}.actor select{border:1px solid var(--line);border-radius:8px;padding:7px 9px;background:white}
+main{max-width:1400px;margin:auto;padding:18px}.hero{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:start;margin-bottom:14px}.hero h1{font-size:24px;margin:0 0 4px}.hero p{margin:0;color:var(--muted)}
+.clock{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 14px;box-shadow:var(--shadow);min-width:110px;text-align:center}.clock strong{font-size:23px;display:block}.clock span{font-size:11px;color:var(--muted)}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:14px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:13px;box-shadow:var(--shadow);overflow:hidden}.panel h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0;padding:12px 14px;border-bottom:1px solid var(--line)}.content{padding:14px}
+.truth-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}.truth{border:1px solid var(--line);border-radius:10px;padding:10px;background:#fbfcfd;min-height:76px}.truth label{display:block;color:var(--muted);font-size:11px;margin-bottom:5px}.truth b{font-size:13px;word-break:break-word}.truth.emphasis{border-color:#a6cbe0;background:var(--blue2)}.truth.warn{border-color:#eed39d;background:var(--amber2)}.truth.ok{border-color:#b6dec9;background:var(--green2)}
+.next{margin-top:12px;border:1px solid #a7cbe0;background:var(--blue2);border-radius:11px;padding:13px}.next h3{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#4c718a;margin:0 0 6px}.next .big{font-size:17px;font-weight:720}.next .meta{color:var(--muted);margin-top:4px}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:11px}
+.btn{border:0;border-radius:8px;padding:8px 11px;cursor:pointer;background:var(--blue);color:#fff;font-weight:650}.btn.secondary{background:#fff;color:#35566d;border:1px solid #b9ccd9}
+.notice{margin-top:9px;padding:8px 10px;border-radius:8px;background:#f6f8fa;color:var(--muted);border:1px solid var(--line);font-size:12px}.notice.bad{background:var(--red2);color:var(--red);border-color:#e9bebe}.notice.good{background:var(--green2);color:var(--green);border-color:#b6dec9}
+.timeline{max-height:410px;overflow:auto}.event{display:grid;grid-template-columns:52px 1fr;gap:9px;padding:9px 0;border-bottom:1px solid #edf1f4}.event:last-child{border-bottom:0}.event time{font-size:12px;color:var(--muted)}.event b{display:block;font-size:13px}.event p{margin:2px 0 0;color:var(--muted);font-size:12px}
+.evidence{max-height:330px;overflow:auto}.ev{padding:9px 0;border-bottom:1px solid #edf1f4}.ev:last-child{border-bottom:0}.ev .top{display:flex;justify-content:space-between;gap:8px}.ev b{font-size:12px}.ev span{font-size:11px;color:var(--muted)}.ev p{margin:3px 0 0;color:#465c70;font-size:12px}
+.source{font-size:11px;color:var(--muted);padding:10px 14px;border-top:1px solid var(--line);background:#fbfcfd}.source code{font-size:10px}.controls{display:grid;grid-template-columns:1fr auto;gap:7px;margin-top:8px}.controls input{min-width:0;border:1px solid var(--line);border-radius:8px;padding:8px}.foot{margin-top:14px;color:var(--muted);font-size:11px;text-align:center}
+@media(max-width:1050px){.layout{grid-template-columns:1fr}.truth-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:650px){header{align-items:flex-start;flex-direction:column}.hero{grid-template-columns:1fr}.truth-grid{grid-template-columns:1fr}.clock{text-align:left}.actor{width:100%}.actor select{flex:1}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><b>AppTS · RESTORE_SERVICE</b><span>HFP-driven working vertical slice</span></div>
+  <div class="trial">SYNTHETIC TRIAL · NO CUSTOMER / PRODUCTION DATA</div>
+  <div class="actor"><label for="actor">Trial actor</label><select id="actor"></select></div>
+</header>
+<main>
+  <div class="hero"><div><h1>PT ABC · Dedicated Internet</h1><p>Parallel operational truths, explicit authority, visible evidence.</p></div><div class="clock"><strong id="clock">--:--</strong><span>Scenario time</span></div></div>
+  <div class="layout">
+    <section>
+      <div class="panel">
+        <h2>Current operational truth</h2>
+        <div class="content">
+          <div class="truth-grid" id="truth"></div>
+          <div class="next" id="next"></div>
+          <div class="notice" id="outcome">Ready.</div>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <h2>Chronology</h2>
+        <div class="content timeline" id="timeline"></div>
+      </div>
+    </section>
+    <aside>
+      <div class="panel">
+        <h2>Evidence</h2>
+        <div class="content evidence" id="evidence"></div>
+        <div class="source" id="source"></div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <h2>No-transition test</h2>
+        <div class="content">
+          <div style="color:var(--muted);font-size:12px">Record a call, follow-up, or checking activity. It extends chronology without silently changing governed truth.</div>
+          <div class="controls"><input id="activityNote" value="Checked console and followed up"><button class="btn secondary" id="activityBtn">Record</button></div>
+          <button class="btn secondary" id="resetBtn" style="margin-top:10px">Reset PT ABC scenario</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+  <div class="foot">Derived from validated HFP RESTORE. Actor selector is a trial-harness convenience, not a Product authority rule.</div>
+</main>
+<script>
+var labels={serviceImpact:'Service impact',diagnosis:'Diagnosis / assessment',fieldDiagnostic:'Field diagnostic',materialDependency:'Material dependency',materialAvailability:'Material availability',materialRelease:'Material release',supplierPath:'Supplier path',logistics:'Logistics',interventionRelease:'Intervention release',fieldWork:'Field work',networkRecovery:'Network recovery',customerVerification:'Customer verification',closureEligibility:'Closure eligibility',ticket:'Ticket',blocker:'Blocker',attention:'Attention'};
+var actors={},actorRef='PERSON-BUDI';
+function byId(id){return document.getElementById(id)}
+function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+async function load(){
+  var r=await fetch('/api/state?actor='+encodeURIComponent(actorRef));
+  var data=await r.json();actors=data.actors;renderActors();render(data.projection);
+}
+function renderActors(){
+  var select=byId('actor'),current=select.value||actorRef,html='';
+  Object.values(actors).filter(function(a){return a.ref!=='SYSTEM'}).forEach(function(a){html+='<option value="'+esc(a.ref)+'">'+esc(a.name)+' · '+esc(a.role)+'</option>'});
+  select.innerHTML=html;
+  if(Array.from(select.options).some(function(o){return o.value===current}))select.value=current;else select.value=actorRef;
+}
+function render(p){
+  byId('clock').textContent=p.currentTime;
+  var html='';
+  Object.entries(p.truth).filter(function(x){return x[0]!=='responsibility'}).forEach(function(x){
+    var k=x[0],v=x[1],cls='';
+    if(k==='blocker'&&v!=='NONE')cls='warn';else if(k==='ticket'&&v==='CLOSED')cls='ok';else if(['networkRecovery','customerVerification','closureEligibility'].includes(k))cls='emphasis';
+    html+='<div class="truth '+cls+'"><label>'+esc(labels[k]||k)+'</label><b>'+esc(v)+'</b></div>';
+  });
+  html+='<div class="truth emphasis"><label>Responsibility</label><b>'+esc(p.truth.responsibility.holder)+' · '+esc(p.truth.responsibility.role)+'</b></div>';
+  byId('truth').innerHTML=html;
+  var actor=actors[actorRef],next='';
+  if(p.complete){
+    next='<h3>Scenario complete</h3><div class="big">Ticket closed with evidence and distinct verification meanings preserved.</div>';
+  }else if(p.nextWorldEvent){
+    next='<h3>Next world change</h3><div class="big">'+esc(p.nextWorldEvent.time)+' · '+esc(p.nextWorldEvent.label)+'</div><div class="meta">Synthetic operational reality arriving from outside AppTS.</div><div class="actions"><button class="btn" data-event="'+esc(p.nextWorldEvent.id)+'" data-actor="SYSTEM">Apply synthetic world event</button></div>';
+  }else if(p.nextHumanActions.length){
+    var a=p.nextHumanActions[0];
+    next='<h3>Lawful next human action</h3><div class="big">'+esc(a.label)+'</div><div class="meta">Available in current trial context: '+esc(actor?actor.name:actorRef)+' · '+esc(actor?actor.role:'')+'</div><div class="actions"><button class="btn" data-event="'+esc(a.id)+'" data-actor="'+esc(actorRef)+'">'+esc(a.label)+'</button></div>';
+  }else{
+    var expected=Object.values(actors).find(function(a){return a.ref===p.expectedActorRef});
+    next='<h3>Waiting on another lawful context</h3><div class="big">Current actor cannot perform the next material action.</div><div class="meta">Required next context: '+esc(expected?expected.name:p.expectedActorRef||'unknown')+' · '+esc(expected?expected.role:'')+'. Switch the trial actor to view that projection.</div>';
+  }
+  byId('next').innerHTML=next;
+  document.querySelectorAll('[data-event]').forEach(function(btn){btn.onclick=function(){applyEvent(btn.dataset.event,btn.dataset.actor)}});
+  byId('timeline').innerHTML=[].concat(p.history).reverse().map(function(e){return '<div class="event"><time>'+esc(e.time)+'</time><div><b>'+esc(e.label)+'</b><p>'+esc(e.consequence)+'</p></div></div>'}).join('');
+  byId('evidence').innerHTML=[].concat(p.evidence).reverse().map(function(e){return '<div class="ev"><div class="top"><b>'+esc(e.source)+'</b><span>'+esc(e.time)+' · '+esc(e.id)+'</span></div><p>'+esc(e.summary)+'</p></div>'}).join('');
+  byId('source').innerHTML='HFP source: <b>'+esc(p.hfpSource.artifact)+'</b><br><code>'+esc(p.hfpSource.fileId)+'</code>';
+}
+async function applyEvent(eventId,asActor){
+  var r=await fetch('/api/apply',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({eventId:eventId,actorRef:asActor})});
+  var data=await r.json();showOutcome(data.result,r.ok);if(data.projection)render(data.projection);else await load();
+}
+async function recordActivity(){
+  var r=await fetch('/api/activity',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({actorRef:actorRef,note:byId('activityNote').value})});
+  var data=await r.json();showOutcome(data.result,true);render(data.projection);
+}
+async function reset(){
+  var r=await fetch('/api/reset',{method:'POST'}),data=await r.json();actorRef='PERSON-BUDI';renderActors();byId('actor').value=actorRef;render(data.projection);showOutcome(data.result,true);
+}
+function showOutcome(result,ok){
+  var box=byId('outcome');box.className='notice '+(ok?'good':'bad');box.textContent=result?(result.kind+(result.reason?' · '+result.reason:'')):'No result';
+}
+byId('actor').onchange=async function(e){actorRef=e.target.value;await load()};
+byId('activityBtn').onclick=recordActivity;byId('resetBtn').onclick=reset;load();
+</script>
+</body>
+</html>
