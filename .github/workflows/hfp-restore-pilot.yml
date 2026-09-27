@@ -1,8 +1,8 @@
 name: hfp-restore-pilot
 
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: [ai/hfp-restore-vertical-slice]
     paths:
       - 'pilot/restore-service/**'
       - '.github/workflows/hfp-restore-pilot.yml'
@@ -13,7 +13,6 @@ permissions:
 
 jobs:
   verify-and-deploy:
-    if: github.head_ref == 'ai/hfp-restore-vertical-slice'
     runs-on: ubuntu-latest
     environment: staging
     timeout-minutes: 15
@@ -180,10 +179,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PUBLIC_PILOT_URL: ${{ steps.deploy.outputs.url }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
+          pr_number="$(gh pr list --repo "${{ github.repository }}" --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number')"
+          test -n "$pr_number"
           body="HFP RESTORE synthetic trial deployed: $PUBLIC_PILOT_URL
 
           Scope: PT ABC RESTORE_SERVICE vertical slice derived from validated HFP. Synthetic data only; not production."
-          gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" --body "$body"
+          gh pr comment "$pr_number" --repo "${{ github.repository }}" --body "$body"
