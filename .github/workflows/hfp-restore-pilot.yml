@@ -7,9 +7,12 @@ on:
       - 'pilot/restore-service/**'
       - '.github/workflows/hfp-restore-pilot.yml'
 
+concurrency:
+  group: hfp-restore-pilot
+  cancel-in-progress: true
+
 permissions:
-  contents: read
-  pull-requests: write
+  contents: write
 
 jobs:
   verify-and-deploy:
@@ -37,7 +40,7 @@ jobs:
           test -f pilot/restore-service/server.mjs
           test -f pilot/restore-service/model.mjs
           tar -czf "$RUNNER_TEMP/appts-hfp-restore-pilot.tar.gz" -C pilot/restore-service .
-          curl -fsSL --retry 3             https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64             -o "$RUNNER_TEMP/cloudflared"
+          curl -fsSL --retry 3 https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o "$RUNNER_TEMP/cloudflared"
           chmod +x "$RUNNER_TEMP/cloudflared"
 
       - name: Prepare pinned SSH identity
@@ -69,7 +72,7 @@ jobs:
             -o ConnectTimeout=12
           )
 
-          scp "${SSH_OPTS[@]}"             "$RUNNER_TEMP/appts-hfp-restore-pilot.tar.gz"             "$RUNNER_TEMP/cloudflared"             appts-mcr@103.127.99.11:/tmp/
+          scp "${SSH_OPTS[@]}" "$RUNNER_TEMP/appts-hfp-restore-pilot.tar.gz" "$RUNNER_TEMP/cloudflared" appts-mcr@103.127.99.11:/tmp/
 
           ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 'bash -s' <<'REMOTE'
           set -euo pipefail
@@ -141,18 +144,19 @@ jobs:
 
           sudo systemctl enable --now appts-hfp-restore-pilot-tunnel.service
           sudo systemctl restart appts-hfp-restore-pilot-tunnel.service
+          invocation="$(sudo systemctl show -p InvocationID --value appts-hfp-restore-pilot-tunnel.service)"
+          test -n "$invocation"
 
           url=""
           for n in $(seq 1 30); do
-            url="$(sudo journalctl -u appts-hfp-restore-pilot-tunnel.service --no-pager -n 120               | grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true)"
+            url="$(sudo journalctl _SYSTEMD_INVOCATION_ID="$invocation" --no-pager -n 120 | grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true)"
             if [ -n "$url" ]; then break; fi
             sleep 2
           done
           test -n "$url"
           printf '%s\n' "$url" | sudo tee /opt/appts-hfp-restore-pilot/PUBLIC_URL >/dev/null
-          printf 'PUBLIC_PILOT_URL=%s\n' "$url"
 
-          rm -f /tmp/appts-hfp-restore-pilot.tar.gz /tmp/cloudflared             /tmp/appts-hfp-restore-pilot.service /tmp/appts-hfp-restore-pilot-tunnel.service
+          rm -f /tmp/appts-hfp-restore-pilot.tar.gz /tmp/cloudflared /tmp/appts-hfp-restore-pilot.service /tmp/appts-hfp-restore-pilot-tunnel.service
           REMOTE
 
           url="$(ssh "${SSH_OPTS[@]}" appts-mcr@103.127.99.11 'cat /opt/appts-hfp-restore-pilot/PUBLIC_URL')"
@@ -175,15 +179,16 @@ jobs:
           echo "hfp_restore_public_trial=FAIL" >&2
           exit 1
 
-      - name: Publish trial link on PR
+      - name: Record current trial URL
         env:
-          GH_TOKEN: ${{ github.token }}
           PUBLIC_PILOT_URL: ${{ steps.deploy.outputs.url }}
         run: |
           set -euo pipefail
-          pr_number="$(gh pr list --repo "${{ github.repository }}" --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number')"
-          test -n "$pr_number"
-          body="HFP RESTORE synthetic trial deployed: $PUBLIC_PILOT_URL
-
-          Scope: PT ABC RESTORE_SERVICE vertical slice derived from validated HFP. Synthetic data only; not production."
-          gh pr comment "$pr_number" --repo "${{ github.repository }}" --body "$body"
+          mkdir -p deployment
+          printf '%s\n' "$PUBLIC_PILOT_URL" > deployment/hfp-restore-pilot-url.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deployment/hfp-restore-pilot-url.txt
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Record current HFP RESTORE pilot URL"
+          git push
