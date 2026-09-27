@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,28 +15,30 @@ const root = dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 8090);
 const bind = process.env.BIND || '127.0.0.1';
 const MAX_BODY = 32 * 1024;
-let state = createInitialState();
+const MAX_SESSIONS = 128;
+const sessions = new Map();
 
 const server = http.createServer(async (req, res) => {
   try {
     const host = req.headers.host || 'localhost';
     const url = new URL(req.url || '/', 'http://' + host);
+    const session = resolveSession(req, res);
 
     if (req.method === 'GET' && url.pathname === '/api/state') {
       const actor = url.searchParams.get('actor') || ACTORS.BUDI.ref;
-      return json(res, 200, { actors: ACTORS, projection: project(state, actor) });
+      return json(res, 200, { actors: ACTORS, projection: project(session.state, actor) });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/apply') {
       const body = await readJson(req);
       const eventId = requiredString(body.eventId, 'eventId');
       const actorRef = requiredString(body.actorRef, 'actorRef');
-      const outcome = applyEvent(state, eventId, actorRef);
-      if (outcome.result.kind === 'APPLIED') state = outcome.state;
+      const outcome = applyEvent(session.state, eventId, actorRef);
+      if (outcome.result.kind === 'APPLIED') session.state = outcome.state;
       return json(res, outcome.result.kind === 'APPLIED' ? 200 : 409, {
         result: outcome.result,
         actors: ACTORS,
-        projection: project(state, actorRef),
+        projection: project(session.state, actorRef),
       });
     }
 
@@ -45,21 +48,21 @@ const server = http.createServer(async (req, res) => {
       const note = typeof body.note === 'string' && body.note.trim()
         ? body.note.trim()
         : 'Follow-up / checking activity';
-      const outcome = recordRoutineActivity(state, actorRef, note);
-      if (outcome.result.kind === 'NO_TRANSITION') state = outcome.state;
+      const outcome = recordRoutineActivity(session.state, actorRef, note);
+      if (outcome.result.kind === 'NO_TRANSITION') session.state = outcome.state;
       return json(res, 200, {
         result: outcome.result,
         actors: ACTORS,
-        projection: project(state, actorRef),
+        projection: project(session.state, actorRef),
       });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/reset') {
-      state = createInitialState();
+      session.state = createInitialState();
       return json(res, 200, {
         result: { kind: 'RESET' },
         actors: ACTORS,
-        projection: project(state, ACTORS.BUDI.ref),
+        projection: project(session.state, ACTORS.BUDI.ref),
       });
     }
 
@@ -76,6 +79,28 @@ const server = http.createServer(async (req, res) => {
 server.listen(port, bind, () => {
   console.log('AppTS HFP RESTORE pilot listening on http://' + bind + ':' + port);
 });
+
+function resolveSession(req, res) {
+  const cookies = String(req.headers.cookie || '').split(';').map(v => v.trim());
+  const pair = cookies.find(v => v.startsWith('appts_pilot_session='));
+  let id = pair ? pair.slice('appts_pilot_session='.length) : '';
+  let session = id ? sessions.get(id) : null;
+  if (!session) {
+    id = randomUUID();
+    session = { state: createInitialState(), touchedAt: Date.now() };
+    sessions.set(id, session);
+    res.setHeader('set-cookie', 'appts_pilot_session=' + id + '; Path=/; HttpOnly; SameSite=Lax');
+    trimSessions();
+  }
+  session.touchedAt = Date.now();
+  return session;
+}
+
+function trimSessions() {
+  if (sessions.size <= MAX_SESSIONS) return;
+  const oldest = [...sessions.entries()].sort((a,b) => a[1].touchedAt - b[1].touchedAt)[0];
+  if (oldest) sessions.delete(oldest[0]);
+}
 
 async function serveStatic(pathname, res) {
   const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
